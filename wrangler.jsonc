@@ -1,0 +1,21 @@
+{
+  // Without this file `wrangler deploy` tries to auto-detect the framework, and its
+  // Vite integration refuses anything below Vite 6 — which is what failed the deploy.
+  // Naming the built output explicitly skips detection altogether, so the Vite version
+  // stops mattering.
+  //
+  // There is no "main" here on purpose: this is a static site, so the Worker serves
+  // assets only and runs no server-side code. Every privileged operation already lives
+  // in Supabase.
+  "name": "adeem-garment",
+  "compatibility_date": "2026-08-12",
+
+  "assets": {
+    "directory": "./dist",
+
+    // Client-side routing: a request for /admin/employees matches no file on disk, so
+    // it must be served the SPA shell rather than a 404. This is the Workers equivalent
+    // of the `/* /index.html 200` rule in public/_redirects.
+    "not_found_handling": "single-page-application"
+  }
+}
