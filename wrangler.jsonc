@@ -14,8 +14,35 @@
     "directory": "./dist",
 
     // Client-side routing: a request for /admin/employees matches no file on disk, so
-    // it must be served the SPA shell rather than a 404. This is the Workers equivalent
-    // of the `/* /index.html 200` rule in public/_redirects.
+    // it must be served the SPA shell rather than a 404.
+    //
+    // This replaces the old public/_redirects rule `/* /index.html 200`, which the API
+    // rejects outright: Workers already strips `.html` and `/index` from asset paths,
+    // so that rule redirects into itself forever (error 100324, "Infinite loop
+    // detected"). Do not reintroduce that file.
     "not_found_handling": "single-page-application"
+  },
+
+  // ---------------------------------------------------------------------------
+  // Everything below mirrors settings that already exist on the deployed Worker.
+  // `wrangler deploy` replaces the remote configuration wholesale with this file,
+  // so anything omitted here is deleted on the next deploy — the custom domain
+  // included. They are restated rather than left to the dashboard for that reason.
+  // ---------------------------------------------------------------------------
+  "routes": [
+    {
+      "pattern": "test.maduraindunil.com",
+      "zone_name": "maduraindunil.com",
+      "custom_domain": true
+    }
+  ],
+
+  // Read by Vite at build time, not at runtime — an assets-only Worker executes no
+  // code that could see them. The anon key is public by design; RLS is the gate, and
+  // the same value is already inlined into the JavaScript bundle this Worker serves.
+  "vars": {
+    "VITE_SUPABASE_URL": "https://hrrpenfmziomugxgdahq.supabase.co",
+    "VITE_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhycnBlbmZtemlvbXVneGdkYWhxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1MzkyNTksImV4cCI6MjEwMjExNTI1OX0.ZE0Iyaa82ot0we8sLii_blxbVdU6k_YFnF_NaqZXdDM",
+    "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_-7pjAXH58kxS6iTT7R_pfA_q0O-F9Zw"
   }
 }
