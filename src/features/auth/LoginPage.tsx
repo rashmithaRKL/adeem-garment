@@ -27,10 +27,9 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: 'minmax(0,1.05fr) minmax(0,.95fr)' }}>
-      <aside style={{
-        padding: '56px 60px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-        color: '#fff', background: 'linear-gradient(160deg,#1e3a8a 0%,#2563eb 55%,#0891b2 100%)'
+    <div className="login">
+      <aside className="login__aside" style={{
+        background: 'linear-gradient(160deg,#1e3a8a 0%,#2563eb 55%,#0891b2 100%)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {/* White plate behind the logo: it is drawn for light backgrounds and its
@@ -43,15 +42,13 @@ export function LoginPage() {
           </span>
         </div>
         <div>
-          <h1 style={{ font: '600 54px/1.02 var(--font-heading)', margin: '0 0 18px', maxWidth: '11ch' }}>
-            Five lines. One source of truth.
-          </h1>
+          <h1 className="login__headline">Five lines. One source of truth.</h1>
           <p style={{ margin: 0, maxWidth: '44ch', fontSize: 16, lineHeight: 1.6, opacity: .85 }}>
             Upload the daily production sheet — the system scans, validates, versions and stores it,
             then updates every line, order and delivery figure automatically.
           </p>
         </div>
-        <p style={{ margin: 0, fontSize: 12.5, opacity: .7 }}>
+        <p className="login__tagline" style={{ margin: 0, fontSize: 12.5, opacity: .7 }}>
           Your role is resolved from the database after authentication, never from the browser.
         </p>
       </aside>

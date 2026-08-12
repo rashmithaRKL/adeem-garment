@@ -73,7 +73,7 @@ export function UploadExcelPage() {
             tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter') inputRef.current?.click(); }}
             style={{
-              border: '2px dashed #bfdbfe', borderRadius: 12, padding: '52px 26px',
+              border: '2px dashed var(--info-border)', borderRadius: 12, padding: '52px 26px',
               textAlign: 'center', cursor: 'pointer', background: 'var(--blue-50)'
             }}
           >
@@ -238,7 +238,7 @@ export function UploadExcelPage() {
       {state.step === 'quality' && state.quality && (
         <>
           <div className="banner" style={{
-            background: 'var(--blue-50)', border: '1px solid #bfdbfe', color: 'var(--text)',
+            background: 'var(--blue-50)', border: '1px solid var(--info-border)', color: 'var(--text)',
             marginBottom: 16, fontSize: 13.5
           }}>
             Recognised as a <strong>{state.quality.label}</strong>. This workbook records inspections

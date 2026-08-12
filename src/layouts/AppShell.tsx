@@ -4,6 +4,7 @@ import { useAuth } from '@/features/auth/AuthProvider';
 // sets img-src to 'self' data: blob:, so a remote logo would be blocked outright.
 // Importing also lets Vite fingerprint the file, so a new logo can never be cached.
 import logoUrl from '@/assets/adeem-logo.png';
+import { useTheme } from '@/lib/theme';
 
 export interface NavItem {
   to: string;
@@ -17,6 +18,27 @@ interface AppShellProps {
   group: string;
   items: NavItem[];
   titles: Record<string, { title: string; sub: string }>;
+}
+
+/**
+ * Rendered twice and shown once. The control belongs at the top of the screen in
+ * both layouts, but "the top" is a different element in each: the topbar on a
+ * desktop, the sticky brand row on a phone, where the topbar sits below the nav
+ * strip and scrolls away. CSS picks the one that applies.
+ */
+function ThemeToggle({ where }: { where: 'bar' | 'rail' }) {
+  const { theme, cycle } = useTheme();
+  return (
+    <button
+      type="button"
+      className={`btn btn--secondary btn--small btn--icon theme-toggle theme-toggle--${where}`}
+      onClick={cycle}
+      title={`Theme: ${theme}. Click to change.`}
+      aria-label={`Theme: ${theme}. Click to change.`}
+    >
+      <span aria-hidden>{theme === 'system' ? '🖥️' : theme === 'dark' ? '🌙' : '☀️'}</span>
+    </button>
+  );
 }
 
 export function AppShell({ group, items, titles }: AppShellProps) {
@@ -53,7 +75,7 @@ export function AppShell({ group, items, titles }: AppShellProps) {
           ))}
         </nav>
 
-        <div style={{ padding: 12, borderTop: '1px solid var(--border-soft)' }}>
+        <div className="sidebar__footer" style={{ padding: 12, borderTop: '1px solid var(--border-soft)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 6px' }}>
             <span style={{
               width: 32, height: 32, borderRadius: '50%', background: 'var(--blue-500)',
@@ -67,6 +89,7 @@ export function AppShell({ group, items, titles }: AppShellProps) {
                 {profile?.role} · {profile?.employeeId}
               </span>
             </span>
+            <ThemeToggle where="rail" />
             <button type="button" className="btn btn--secondary btn--small" onClick={() => void signOut()} title="Sign out">
               Sign out
             </button>
@@ -80,9 +103,15 @@ export function AppShell({ group, items, titles }: AppShellProps) {
             <h1 className="topbar__title">{meta.title}</h1>
             <p className="topbar__sub" style={{ margin: 0 }}>{meta.sub}</p>
           </div>
-          <span className="live-pill"><span className="live-pill__dot" aria-hidden />Live</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
+            <ThemeToggle where="bar" />
+            <span className="live-pill"><span className="live-pill__dot" aria-hidden />Live</span>
+          </div>
         </header>
-        <main className="content"><Outlet /></main>
+        {/* Keyed on the path so React discards the old subtree and the animation
+            restarts on every navigation. Without the key the class is already
+            applied and the browser has nothing new to animate. */}
+        <main className="content page-in" key={pathname}><Outlet /></main>
       </div>
     </div>
   );

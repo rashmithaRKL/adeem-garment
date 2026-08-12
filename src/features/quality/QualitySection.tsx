@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { formatNumber } from '@/lib/format';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
+import { useTilt, useCountUp } from '@/lib/motion';
 import { fetchQualityOverview, type DefectStat } from './queries';
 import { STAGE_LABEL } from './types';
 
@@ -16,25 +17,55 @@ const MARK_LOW = 'var(--red-500)';
 const pctText = (n: number | null): string => (n == null ? '—' : n.toFixed(1) + '%');
 
 /** Horizontal bars: one measure, ranked. Labels are always present, never hover-only. */
-function BarRow({ label, value, max, suffix, low, hint }: {
-  label: string; value: number; max: number; suffix: string; low?: boolean; hint?: string;
+function BarRow({ label, value, max, suffix, low, hint, index = 0 }: {
+  label: string; value: number; max: number; suffix: string;
+  low?: boolean; hint?: string; index?: number;
 }) {
   const width = max > 0 ? Math.max((value / max) * 100, value > 0 ? 1.5 : 0) : 0;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '116px minmax(0,1fr) 74px', alignItems: 'center', gap: 12 }}
-      title={hint}>
+    <div className="barrow" title={hint}>
       <span style={{ fontSize: 12.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {label}
       </span>
       <span style={{ display: 'block', height: 10, background: 'var(--surface-muted)', borderRadius: 5 }}>
-        <span style={{
+        <span className="grow-x" style={{
           display: 'block', height: '100%', width: width + '%',
-          background: low ? MARK_LOW : MARK, borderRadius: 5, transition: 'width .3s'
+          background: low ? MARK_LOW : MARK, borderRadius: 5,
+          ['--i' as string]: index
         }} />
       </span>
       <span style={{ textAlign: 'right', font: '600 13px var(--font-body)', color: 'var(--text)' }}>
         {suffix}
       </span>
+    </div>
+  );
+}
+
+/** A quality headline tile: tilts toward the cursor, counts up on arrival. */
+function StatTile({ value, label, color, index }: {
+  value: string; label: string; color?: string; index: number;
+}) {
+  const tilt = useTilt<HTMLDivElement>();
+  const numeric = Number(value.replace(/[,\s%]/g, ''));
+  const counted = useCountUp(Number.isFinite(numeric) ? numeric : 0);
+  const decimals = (value.split('.')[1] ?? '').replace(/[^0-9]/g, '').length;
+  const shown = Number.isFinite(numeric)
+    ? counted.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+      + (value.trim().endsWith('%') ? '%' : '')
+    : value;
+
+  return (
+    <div
+      ref={tilt.ref}
+      onPointerMove={tilt.onPointerMove}
+      onPointerLeave={tilt.onPointerLeave}
+      className="card tilt rise"
+      style={{ ['--i' as string]: index }}
+    >
+      <div className="tilt__pop" style={{ font: '600 30px/1 var(--font-heading)', color: color ?? 'var(--text)' }}>
+        {shown}
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>{label}</div>
     </div>
   );
 }
@@ -77,10 +108,27 @@ function Trend({ points }: { points: { date: string; passPct: number; checked: n
           stroke={MARK_LOW} strokeWidth="1" strokeDasharray="3 3" opacity=".55" />
       )}
 
-      <path d={path} fill="none" stroke={MARK} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {/* Area under the curve, revealed as the line advances over it. */}
+      <defs>
+        <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={MARK} stopOpacity="0.22" />
+          <stop offset="100%" stopColor={MARK} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path
+        className="rise"
+        style={{ ['--i' as string]: 6 }}
+        d={`${path} L${x(points.length - 1)},${h - pad.b} L${x(0)},${h - pad.b} Z`}
+        fill="url(#trendFill)"
+        stroke="none"
+      />
+
+      <path className="draw-line" pathLength={1} d={path} fill="none" stroke={MARK}
+        strokeWidth="2.4" strokeLinejoin="round" strokeLinecap="round" />
 
       {points.map((p, i) => (
-        <circle key={p.date} cx={x(i)} cy={y(p.passPct)} r="4.5"
+        <circle key={p.date} className="pop-in" style={{ ['--i' as string]: i }}
+          cx={x(i)} cy={y(p.passPct)} r="4.5"
           fill={p.passPct < EFFICIENCY_THRESHOLD ? MARK_LOW : MARK} stroke="var(--surface)" strokeWidth="2">
           <title>{`${p.date} · ${p.passPct.toFixed(1)}% pass · ${formatNumber(p.checked)} checked`}</title>
         </circle>
@@ -130,38 +178,22 @@ export function QualitySection() {
   return (
     <>
       <div className="grid grid--kpi" style={{ marginTop: 16 }}>
-        <div className="card">
-          <div style={{ font: '600 30px/1 var(--font-heading)', color: low(d.passPct) ? MARK_LOW : MARK }}>
-            {pctText(d.passPct)}
-          </div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
-            Overall pass rate {low(d.passPct) ? '· below target' : ''}
-          </div>
-        </div>
-        <div className="card">
-          <div style={{ font: '600 30px/1 var(--font-heading)', color: 'var(--text)' }}>{formatNumber(d.checked)}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>Pieces checked</div>
-        </div>
-        <div className="card">
-          <div style={{ font: '600 30px/1 var(--font-heading)', color: 'var(--text)' }}>{formatNumber(d.defects)}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>Defects found</div>
-        </div>
-        <div className="card">
-          <div style={{ font: '600 30px/1 var(--font-heading)', color: 'var(--text)' }}>{d.stages.length}</div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
-            Inspection stages · {d.basis === 'daily' ? 'daily figures' : 'monthly figures'}
-          </div>
-        </div>
+        <StatTile index={0} value={pctText(d.passPct)} color={low(d.passPct) ? MARK_LOW : MARK}
+          label={'Overall pass rate' + (low(d.passPct) ? ' · below target' : '')} />
+        <StatTile index={1} value={formatNumber(d.checked)} label="Pieces checked" />
+        <StatTile index={2} value={formatNumber(d.defects)} label="Defects found" />
+        <StatTile index={3} value={String(d.stages.length)}
+          label={`Inspection stages · ${d.basis === 'daily' ? 'daily figures' : 'monthly figures'}`} />
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1.55fr) minmax(0,1fr)', marginTop: 16 }}>
+      <div className="grid grid--split" style={{ marginTop: 16 }}>
         <Card title="Pass rate by inspection stage"
           aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
             {d.periodFrom} → {d.periodTo}
           </span>}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-            {d.stages.map((s) => (
-              <BarRow key={s.stage} label={STAGE_LABEL[s.stage]} value={s.passPct ?? 0} max={100}
+            {d.stages.map((s, i) => (
+              <BarRow key={s.stage} index={i} label={STAGE_LABEL[s.stage]} value={s.passPct ?? 0} max={100}
                 suffix={pctText(s.passPct)} low={low(s.passPct)}
                 hint={`${formatNumber(s.checked)} checked · ${formatNumber(s.defects)} defects`} />
             ))}
@@ -178,8 +210,8 @@ export function QualitySection() {
             </p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {d.defectCategories.map((c) => (
-                <BarRow key={c.category} label={c.category} value={c.qty} max={maxDefect}
+              {d.defectCategories.map((c, i) => (
+                <BarRow key={c.category} index={i} label={c.category} value={c.qty} max={maxDefect}
                   suffix={formatNumber(c.qty)} />
               ))}
             </div>
@@ -187,11 +219,11 @@ export function QualitySection() {
         </Card>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.55fr)', marginTop: 16 }}>
+      <div className="grid grid--split-rev" style={{ marginTop: 16 }}>
         <Card title="Pass rate by line">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-            {d.lines.map((l) => (
-              <BarRow key={l.key} label={l.label} value={l.passPct ?? 0} max={100}
+            {d.lines.map((l, i) => (
+              <BarRow key={l.key} index={i} label={l.label} value={l.passPct ?? 0} max={100}
                 suffix={pctText(l.passPct)} low={low(l.passPct)}
                 hint={`${formatNumber(l.checked)} checked · ${formatNumber(l.defects)} defects`} />
             ))}

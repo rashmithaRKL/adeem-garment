@@ -47,13 +47,16 @@ export function EmployeeDashboardPage() {
         </Link>
       </div>
 
-      <div className="grid grid--kpi" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
-        <Kpi label="Focus line" icon="⛭" tone="blue"
+      {/* grid--kpi--3 rather than an inline grid-template-columns: an inline style
+          wins over every media query, so hardcoding three columns here is exactly
+          what stops the row collapsing on a phone. */}
+      <div className="grid grid--kpi grid--kpi--3">
+        <Kpi index={0} label="Focus line" icon="🏭" tone="blue"
           value={focus ? formatNumber(focus.actual) : '-'}
           sub={focus ? 'of ' + formatNumber(focus.target) + ' · ' + focus.lineName : 'no records today'} />
-        <Kpi label="My uploads" icon="⬆" tone="purple"
+        <Kpi index={1} label="My uploads" icon="📤" tone="purple"
           value={String(uploads.data?.length ?? 0)} sub="documents you created" />
-        <Kpi label="Last import" icon="✓" tone="green"
+        <Kpi index={2} label="Last import" icon="✅" tone="green"
           value={formatNumber(lastUpload?.valid_record_count ?? 0)}
           sub={(lastUpload?.error_count ?? 0) + ' errors'} />
       </div>

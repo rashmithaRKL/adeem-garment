@@ -41,16 +41,16 @@ export function AuditLogPage() {
           {(data ?? []).map((log) => {
             const [bg, fg] = TONE[log.action] ?? ['var(--surface-muted)', 'var(--text-muted)'];
             return (
-              <div key={log.id} style={{
-                display: 'grid', gridTemplateColumns: 'minmax(0,190px) minmax(0,1fr) 150px',
-                gap: 14, alignItems: 'center', padding: '12px 6px', borderBottom: '1px solid var(--border-soft)'
-              }}>
+              <div key={log.id} className="auditrow">
                 <span className="chip" style={{ background: bg, color: fg, justifySelf: 'start' }}>{log.action}</span>
-                <span style={{ fontSize: 13.5, overflowWrap: 'anywhere' }}>
+                {/* break-word, not anywhere: "anywhere" lets the column's min-content
+                    width fall to a single character, which is how a grid track this
+                    narrow ends up rendering the sentence vertically. */}
+                <span style={{ fontSize: 13.5, overflowWrap: 'break-word' }}>
                   {log.description}
                   <span style={{ color: 'var(--text-faint)' }}> · {log.profiles?.full_name ?? 'system'}</span>
                 </span>
-                <span className="mono" style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-faint)' }}>
+                <span className="auditrow__time mono">
                   {formatDateTime(log.created_at)}
                 </span>
               </div>

@@ -57,7 +57,7 @@ input:focus-visible {
 .sidebar__nav { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px; }
 .sidebar__group {
   font: 600 10.5px var(--font-body); letter-spacing: .16em; text-transform: uppercase;
-  color: #a3aec0; padding: 8px 10px 6px;
+  color: var(--text-faint); padding: 8px 10px 6px;
 }
 .navlink {
   display: flex; align-items: center; gap: 10px; padding: 9px 10px;
@@ -99,6 +99,162 @@ input:focus-visible {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm);
 }
+
+/* ---------------------------------------------------------------------------
+   Depth and motion
+   Only transform, opacity and box-shadow are animated. Those three are the ones
+   the compositor can handle without re-running layout, which is what keeps this
+   smooth on the machines actually on the factory floor.
+   --------------------------------------------------------------------------- */
+
+/* The perspective lives on the grid, not the card: sharing one vanishing point
+   makes a row of tiles read as one surface. Give each card its own and they each
+   tilt around themselves, which looks like a bug. */
+.grid--kpi, .grid--cards { perspective: 1100px; }
+
+.tilt {
+  --rx: 0deg; --ry: 0deg; --lift: 0px; --mx: 50%; --my: 50%;
+  position: relative; isolation: isolate; overflow: hidden;
+  transform: translate3d(0, var(--lift), 0) rotateX(var(--rx)) rotateY(var(--ry));
+  transform-style: preserve-3d;
+  transition: transform .35s cubic-bezier(.22,.61,.36,1), box-shadow .35s ease;
+  will-change: transform;
+}
+.tilt:hover, .tilt:focus-within {
+  box-shadow: var(--shadow-lift), 0 0 0 1px var(--ring);
+}
+
+/* Spotlight: a pool of light that follows the pointer across the card face. --mx
+   and --my are written by useTilt, so the highlight and the rotation share one
+   source of truth and can never drift apart. */
+.tilt::after {
+  content: ''; position: absolute; inset: 0; z-index: -1;
+  border-radius: inherit; pointer-events: none;
+  background: radial-gradient(340px circle at var(--mx) var(--my),
+              var(--glow), transparent 62%);
+  opacity: 0; transition: opacity .35s ease;
+}
+.tilt:hover::after, .tilt:focus-within::after { opacity: 1; }
+
+/* Sheen: a single band of light sweeping across, once per hover. Parked off the
+   left edge at rest so it never shows until asked. */
+.tilt::before {
+  content: ''; position: absolute; inset: 0; z-index: -1;
+  border-radius: inherit; pointer-events: none;
+  background: linear-gradient(105deg,
+              transparent 38%, var(--sheen) 50%, transparent 62%);
+  transform: translateX(-130%);
+}
+.tilt:hover::before { transform: translateX(130%); transition: transform .85s ease; }
+
+/* A finger has no hover state: on a touch screen the tilt would latch at whatever
+   angle the last tap left it and stay there, because no pointerleave ever fires.
+   Depth is therefore a mouse-only affordance, and the cards stay flat on phones. */
+@media (hover: none), (pointer: coarse) {
+  .tilt { transform: none !important; transition: box-shadow .2s ease; }
+  .tilt::before, .tilt::after { display: none; }
+  .tilt__pop { transform: none; }
+  .navlink:hover { transform: none; }
+  .navlink:hover .navlink__icon { transform: none; }
+}
+
+/* Lifts the number off the card face as it tilts. Small on purpose: a KPI is a
+   figure to read, not a diorama. */
+.tilt__pop { transform: translateZ(28px); }
+
+/* --- SVG line that draws itself -----------------------------------------
+   pathLength="1" is set on the element, so one dash spans the whole path
+   whatever its real geometry — no measuring in JavaScript. */
+@keyframes draw-line { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.draw-line {
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+  animation: draw-line 1.15s cubic-bezier(.4,0,.2,1) .15s forwards;
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: scale(.2); }
+  60%  { transform: scale(1.35); }
+  to   { opacity: 1; transform: scale(1); }
+}
+/* Points arrive behind the line's leading edge, so the marker lands as the line
+   reaches it rather than before. */
+.pop-in {
+  transform-box: fill-box; transform-origin: center;
+  opacity: 0; animation: pop-in .45s cubic-bezier(.34,1.56,.64,1) forwards;
+  animation-delay: calc(300ms + var(--i, 0) * 110ms);
+}
+
+/* --- Navigation ---------------------------------------------------------- */
+.navlink { position: relative; overflow: hidden; transition: background .2s ease, color .2s ease; }
+/* The rail on an active row grows from its centre rather than appearing. */
+@keyframes rail { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.navlink--active::before {
+  content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--blue-500);
+  animation: rail .3s cubic-bezier(.34,1.56,.64,1) forwards;
+}
+.navlink:hover { transform: translateX(2px); }
+.navlink:hover .navlink__icon { transform: scale(1.22) rotate(-7deg); }
+.navlink__icon { transition: transform .28s cubic-bezier(.34,1.56,.64,1); }
+
+/* --- The live indicator, actually alive ---------------------------------- */
+.live-pill__dot { position: relative; }
+.live-pill__dot::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  background: currentColor; animation: ping 1.9s cubic-bezier(0,0,.2,1) infinite;
+}
+@keyframes ping {
+  0%   { transform: scale(1);   opacity: .65; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+
+/* --- Route change -------------------------------------------------------- */
+@keyframes page-in {
+  from { opacity: 0; transform: translate3d(0, 10px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+.page-in { animation: page-in .38s cubic-bezier(.22,.61,.36,1) both; }
+
+/* Entrance. --i staggers a row so the tiles arrive in sequence rather than as
+   one block; it is set inline where the list is rendered. */
+@keyframes rise {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+.rise {
+  opacity: 0;
+  animation: rise .5s cubic-bezier(.22,.61,.36,1) forwards;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+
+/* Bars grow from nothing on first paint. scaleX rather than width so the browser
+   never re-lays-out the row mid-animation. */
+@keyframes grow-x {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.grow-x {
+  transform-origin: left center;
+  animation: grow-x .7s cubic-bezier(.22,.61,.36,1) both;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+/* An explicit request from the operating system, honoured everywhere: jump to the
+   finished state rather than animate toward it. */
+@media (prefers-reduced-motion: reduce) {
+  .tilt { transition: none; transform: none !important; }
+  .tilt::before, .tilt::after { display: none; }
+  .rise { opacity: 1; animation: none; }
+  .grow-x { animation: none; transform: none; }
+  .bar__fill { transition: none; }
+  .draw-line { stroke-dasharray: none; stroke-dashoffset: 0; animation: none; }
+  .pop-in { opacity: 1; animation: none; }
+  .page-in { animation: none; }
+  .navlink:hover { transform: none; }
+  .navlink:hover .navlink__icon { transform: none; }
+  .navlink--active::before { animation: none; }
+  /* A dot that never stops pulsing is the worst offender of the lot. */
+  .live-pill__dot::after { animation: none; display: none; }
+}
 .card__title {
   font: 600 17px var(--font-heading); letter-spacing: .04em;
   text-transform: uppercase; margin: 0 0 14px;
@@ -139,10 +295,24 @@ input:focus-visible {
 }
 .btn--primary { background: var(--blue-500); color: #fff; box-shadow: var(--shadow-md); }
 .btn--primary:hover { background: var(--blue-600); }
-.btn--secondary { background: var(--surface); color: var(--text); border: 1px solid #cbd5e1; }
+.btn--secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .btn--secondary:hover { background: var(--surface-muted); }
 .btn--ghost { background: transparent; color: var(--text-muted); }
 .btn--small { padding: 5px 10px; font: 500 12px var(--font-body); }
+/* Square, so a single glyph sits centred instead of floating in a wide pill. */
+.btn--icon {
+  padding: 5px; min-width: 32px; font-size: 15px; line-height: 1;
+  display: inline-grid; place-items: center;
+}
+
+/* Only one of the two theme buttons is ever on screen. Desktop uses the topbar;
+   the sidebar copy takes over below 780px, where the topbar is no longer the top
+   of anything. */
+.theme-toggle--rail { display: none; }
+@media (max-width: 780px) {
+  .theme-toggle--bar { display: none; }
+  .theme-toggle--rail { display: inline-grid; }
+}
 .btn--success { background: var(--green-500); color: #fff; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
@@ -152,7 +322,7 @@ input:focus-visible {
   text-transform: uppercase; color: var(--text-muted);
 }
 .input {
-  border: 1px solid #d8dee9; border-radius: var(--radius);
+  border: 1px solid var(--border); border-radius: var(--radius);
   padding: 12px 13px; font: 400 15px var(--font-body); background: var(--surface);
 }
 .input:focus { border-color: var(--blue-500); box-shadow: 0 0 0 3px var(--blue-50); outline: none; }
@@ -170,22 +340,137 @@ input:focus-visible {
   border-radius: 11px; padding: 13px 16px; font-size: 13px;
   line-height: 1.5; margin-bottom: var(--space-4);
 }
-.banner--info { background: var(--blue-50); border: 1px solid #bfdbfe; color: var(--blue-900); }
+.banner--info { background: var(--blue-50); border: 1px solid var(--info-border); color: var(--blue-900); }
 .banner--error { background: var(--red-50); border: 1px solid var(--red-200); color: var(--red-500); }
 
-/* ---------- responsive: supervisors upload from the floor ---------- */
-@media (max-width: 1100px) { .grid--kpi { grid-template-columns: repeat(2, 1fr); } }
+/* ---------- responsive: supervisors upload from the floor ----------
+   These pages are read on a phone at the end of a line as often as at a desk, so
+   the breakpoints below are the layout, not an afterthought bolted on at the end. */
+
+/* A wide panel beside a narrow one. Declared here rather than inline on each page
+   so it can actually collapse — an inline style is unreachable from a media query,
+   which is exactly why these grids used to overflow on a phone. */
+.grid--kpi--3     { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid--split      { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
+.grid--split-rev  { grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); }
+
+/* action · description · timestamp */
+.auditrow {
+  display: grid; grid-template-columns: minmax(0, 190px) minmax(0, 1fr) 150px;
+  gap: 14px; align-items: center; padding: 12px 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.auditrow__time { text-align: right; font-size: 12px; color: var(--text-faint); }
+
+/* label · bar · value */
+.barrow { display: grid; grid-template-columns: 116px minmax(0, 1fr) 74px; align-items: center; gap: 12px; }
+/* line · progress · efficiency · status */
+.linerow { display: grid; grid-template-columns: 120px minmax(0, 1fr) 92px 100px; align-items: center; gap: 14px; padding: 11px 8px; }
+
+/* The sign-in split: brand panel beside the form. */
+.login { min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); }
+.login__aside { padding: 56px 60px; display: flex; flex-direction: column; justify-content: space-between; color: #fff; }
+.login__headline { font: 600 54px/1.02 var(--font-heading); margin: 0 0 18px; max-width: 11ch; }
+
+@media (max-width: 900px) {
+  /* The panel stops being a column and becomes a header strip, so the form is
+     the first thing on screen instead of below a screenful of marketing. */
+  .login { grid-template-columns: minmax(0, 1fr); }
+  .login__aside { padding: 26px 24px; gap: 18px; }
+  .login__headline { font-size: 30px; max-width: none; }
+  .login__aside p { font-size: 14px !important; }
+  .login__tagline { display: none; }
+}
+@media (max-width: 560px) {
+  .barrow { grid-template-columns: 88px minmax(0, 1fr) 56px; gap: 8px; font-size: 12px; }
+  .login__headline { font-size: 25px; }
+}
+
+@media (max-width: 1100px) {
+  .grid--kpi, .grid--kpi--3 { grid-template-columns: repeat(2, 1fr); }
+  .grid--split, .grid--split-rev { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 900px) {
+  .grid--cards { grid-template-columns: minmax(0, 1fr); }
+}
 
 @media (max-width: 780px) {
-  .shell { flex-direction: column; height: auto; min-height: 100vh; }
+  .shell { flex-direction: column; height: auto; min-height: 100dvh; }
+  /* Brand and account share one row, nav wraps beneath. Three stacked bands of
+     chrome before any data was most of the screen on a phone. */
   .sidebar {
-    width: 100%; flex-direction: row; overflow-x: auto;
+    width: 100%; flex-direction: row; flex-wrap: wrap; align-items: center;
     border-right: 0; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 20;
   }
-  .sidebar__brand, .sidebar__group, .sidebar__footer-text { display: none; }
-  .sidebar__nav { flex-direction: row; padding: 8px; }
-  .navlink { white-space: nowrap; min-height: 44px; }
-  .grid--kpi { grid-template-columns: 1fr; }
+  .sidebar__brand {
+    flex: 1 1 auto; width: auto; flex-direction: row; align-items: center;
+    gap: 10px; padding: 8px var(--space-4); border-bottom: 0;
+  }
+  .sidebar__logo { height: 34px; }
+  .sidebar__brand-sub, .sidebar__group, .sidebar__footer-text { display: none; }
+  .sidebar__footer {
+    flex: 0 0 auto; border-top: 0 !important; padding: 6px 12px !important;
+  }
+  /* The account row is the only thing sharing the brand's line, so it keeps its
+     controls tight rather than spreading across the free space. */
+  .sidebar__footer > div { gap: 6px !important; padding: 0 !important; }
+  .sidebar__nav {
+    flex: 1 1 100%; order: 3; flex-direction: row; padding: 4px 8px 6px; gap: 4px;
+    overflow-x: auto; scrollbar-width: none;
+    border-top: 1px solid var(--border-soft);
+    /* Each item snaps under the thumb instead of drifting between two. */
+    scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+  }
+  .sidebar__nav::-webkit-scrollbar { display: none; }
+  .navlink {
+    /* The base rule sets width:100%, which in a row flex container makes every
+       tab fight for the full width and then shrink — that is what was chopping
+       "Production Lines" down to "oduction Lin". Size to content instead, and
+       let the strip scroll. */
+    width: auto; flex: 0 0 auto; overflow: visible;
+    white-space: nowrap; min-height: 44px; scroll-snap-align: start;
+    flex-direction: column; gap: 3px; padding: 6px 11px; font-size: 11px;
+    justify-content: center;
+  }
+  .navlink__icon { font-size: 18px; }
+  .navlink__badge { margin-left: 0; }
+  /* The rail belongs on the left of a column, underneath a row. */
+  .navlink--active::before {
+    left: 8px; right: 8px; top: auto; bottom: 0;
+    width: auto; height: 3px; border-radius: 3px 3px 0 0;
+  }
+  .topbar__sub { display: none; }
+
+  .grid--kpi { grid-template-columns: repeat(2, 1fr); }
   .content { padding: var(--space-4); }
   .topbar { height: auto; padding: var(--space-3) var(--space-4); flex-wrap: wrap; }
+  /* Four columns cannot survive a 390px screen; each line becomes its own block. */
+  .linerow { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 4px; border-bottom: 1px solid var(--border-soft); }
+  .linerow > div:nth-child(3), .linerow > div:nth-child(4) { text-align: left !important; }
+  /* 190px + 150px of fixed columns left the description about one character wide,
+     so it stacks here instead: chip, then the sentence, then the timestamp. */
+  .auditrow { grid-template-columns: minmax(0, 1fr); gap: 7px; align-items: start; }
+  .auditrow__time { text-align: left; }
+  .card { padding: 14px; }
+  .card__title { font-size: 15px; }
+  .kpi__value { font-size: 26px; }
+  /* A table cannot reflow, so it scrolls — and says so by keeping a visible edge. */
+  .table { min-width: 620px; }
+  .table-scroll { -webkit-overflow-scrolling: touch; }
+}
+
+/* Two KPI tiles abreast holds down to about 360px. One tile per row turned four
+   figures into a full screen of scrolling for no gain in legibility. */
+@media (max-width: 460px) {
+  .content { padding: var(--space-3); }
+  .btn { min-height: 40px; }
+  .kpi__value { font-size: 23px; }
+  .kpi__label { font-size: 10.5px; letter-spacing: .02em; }
+  .card { padding: 12px; }
+}
+
+@media (max-width: 359px) {
+  .grid--kpi, .grid--kpi--3 { grid-template-columns: 1fr; }
 }

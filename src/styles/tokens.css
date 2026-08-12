@@ -1,7 +1,17 @@
+/* Colour is used semantically, never decoratively.
+   Blue production, green good, amber warning, red delayed, purple orders,
+   orange pending, cyan analytics.
+
+   Themes are three-state. Bare :root is light. The dark block is guarded with
+   :not([data-theme="light"]) so the system preference applies on its own, while an
+   explicit choice still wins in both directions. The CSP forbids inline script, so
+   no blocking script can stamp the theme before first paint — letting CSS answer
+   the system preference is what keeps the page from flashing white on a dark
+   device. JavaScript only ever writes the manual override. */
+
 :root {
-  /* Colour is used semantically, never decoratively.
-     Blue production, green good, amber warning, red delayed, purple orders,
-     orange pending, cyan analytics. */
+  color-scheme: light;
+
   --blue-50:#eff6ff;  --blue-500:#2563eb; --blue-600:#1d4ed8; --blue-900:#1e3a8a;
   --green-50:#ecfdf5; --green-500:#16a34a; --green-600:#15803d; --green-200:#bbf7d0;
   --amber-50:#fffbeb; --amber-500:#d97706; --amber-200:#fde68a;
@@ -19,6 +29,12 @@
   --text-muted:#475569;
   --text-faint:#94a3b8;
 
+  /* Effects that must invert with the theme rather than be restated at each use. */
+  --sheen: rgba(255,255,255,.62);
+  --glow: rgba(37,99,235,.13);
+  --ring: rgba(37,99,235,.16);
+  --info-border:#bfdbfe;
+
   --radius-sm:7px;
   --radius:9px;
   --radius-lg:12px;
@@ -28,8 +44,100 @@
 
   --shadow-sm:0 1px 2px rgba(15,23,42,.04);
   --shadow-md:0 6px 16px rgba(37,99,235,.28);
+  --shadow-lift:0 22px 48px rgba(15,23,42,.16), 0 4px 12px rgba(15,23,42,.07);
 
   --font-heading:'Barlow Condensed', system-ui, sans-serif;
   --font-body:'Barlow', system-ui, sans-serif;
   --font-mono:ui-monospace, Menlo, monospace;
+}
+
+/* The dark values, defined once and referenced by both selectors below. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    /* The 500s are lifted toward the light end: the light-mode values are tuned
+       for contrast against white and go muddy on a dark surface. */
+    --blue-500:#60a5fa; --blue-600:#93c5fd; --blue-900:#bfdbfe;
+    --green-500:#4ade80; --green-600:#86efac;
+    --amber-500:#fbbf24;
+    --red-500:#f87171;
+    --purple-500:#a78bfa;
+    --orange-500:#fb923c;
+    --cyan-500:#22d3ee;
+
+    /* The 50s are tints on white and would glare here, so they become washes of
+       their own hue at low alpha instead. */
+    --blue-50:rgba(96,165,250,.15);
+    --green-50:rgba(74,222,128,.15);
+    --amber-50:rgba(251,191,36,.15);
+    --red-50:rgba(248,113,113,.15);
+    --purple-50:rgba(167,139,250,.15);
+    --orange-50:rgba(251,146,60,.15);
+    --cyan-50:rgba(34,211,238,.15);
+    --green-200:rgba(74,222,128,.35);
+    --amber-200:rgba(251,191,36,.35);
+    --red-200:rgba(248,113,113,.35);
+
+    --page:#0b1220;
+    --surface:#111a2b;
+    --surface-muted:#172338;
+    --border:#243047;
+    --border-soft:#1c2740;
+    --text:#e6edf8;
+    --text-muted:#a3b2c9;
+    --text-faint:#6d809e;
+
+    /* A white sheen on a dark card reads as a blown highlight. */
+    --sheen: rgba(255,255,255,.10);
+    --glow: rgba(96,165,250,.16);
+    --ring: rgba(96,165,250,.22);
+    --info-border:rgba(96,165,250,.35);
+
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+    --shadow-md:0 6px 16px rgba(0,0,0,.55);
+    --shadow-lift:0 22px 48px rgba(0,0,0,.55), 0 4px 12px rgba(0,0,0,.4);
+  }
+}
+
+/* Explicitly chosen dark, regardless of what the operating system prefers. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --blue-500:#60a5fa; --blue-600:#93c5fd; --blue-900:#bfdbfe;
+  --green-500:#4ade80; --green-600:#86efac;
+  --amber-500:#fbbf24;
+  --red-500:#f87171;
+  --purple-500:#a78bfa;
+  --orange-500:#fb923c;
+  --cyan-500:#22d3ee;
+
+  --blue-50:rgba(96,165,250,.15);
+  --green-50:rgba(74,222,128,.15);
+  --amber-50:rgba(251,191,36,.15);
+  --red-50:rgba(248,113,113,.15);
+  --purple-50:rgba(167,139,250,.15);
+  --orange-50:rgba(251,146,60,.15);
+  --cyan-50:rgba(34,211,238,.15);
+  --green-200:rgba(74,222,128,.35);
+  --amber-200:rgba(251,191,36,.35);
+  --red-200:rgba(248,113,113,.35);
+
+  --page:#0b1220;
+  --surface:#111a2b;
+  --surface-muted:#172338;
+  --border:#243047;
+  --border-soft:#1c2740;
+  --text:#e6edf8;
+  --text-muted:#a3b2c9;
+  --text-faint:#6d809e;
+
+  --sheen: rgba(255,255,255,.10);
+  --glow: rgba(96,165,250,.16);
+  --ring: rgba(96,165,250,.22);
+  --info-border:rgba(96,165,250,.35);
+
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 6px 16px rgba(0,0,0,.55);
+  --shadow-lift:0 22px 48px rgba(0,0,0,.55), 0 4px 12px rgba(0,0,0,.4);
 }

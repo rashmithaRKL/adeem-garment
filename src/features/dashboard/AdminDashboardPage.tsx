@@ -23,20 +23,20 @@ export function AdminDashboardPage() {
   return (
     <QueryState isLoading={kpis.isLoading || lines.isLoading} error={kpis.error ?? lines.error}>
       <div className="grid grid--kpi">
-        <Kpi label="Today · production" icon="▲" tone="blue"
+        <Kpi index={0} label="Today · production" icon="📈" tone="blue"
           value={formatNumber(k?.todayActual ?? 0)}
           sub={'of ' + formatNumber(k?.todayTarget ?? 0) + ' target'}
           delta={formatPercent(k?.achievement)} />
-        <Kpi label="Active orders" icon="▤" tone="purple"
+        <Kpi index={1} label="Active orders" icon="📋" tone="purple"
           value={String(k?.activeOrders ?? 0)}
           sub={(k?.completedOrders ?? 0) + ' completed'} />
-        <Kpi label="Remaining qty" icon="⧗" tone="orange"
+        <Kpi index={2} label="Remaining qty" icon="⏳" tone="orange"
           value={formatNumber(k?.remainingQuantity ?? 0)} sub="across open orders" />
-        <Kpi label="Avg efficiency" icon="⚡" tone="green"
+        <Kpi index={3} label="Avg efficiency" icon="⚡" tone="green"
           value={formatPercent(k?.avgEfficiency)} sub="target 88%" />
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1.55fr) minmax(0,1fr)', marginTop: 16 }}>
+      <div className="grid grid--split" style={{ marginTop: 16 }}>
         <Card title="Production lines" aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>today · target vs actual</span>}>
           {(lines.data ?? []).length === 0 && (
             <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
@@ -48,7 +48,7 @@ export function AdminDashboardPage() {
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {(lines.data ?? []).map((line) => (
-              <div key={line.id} style={{ display: 'grid', gridTemplateColumns: '120px minmax(0,1fr) 92px 100px', alignItems: 'center', gap: 14, padding: '11px 8px' }}>
+              <div key={line.id} className="linerow">
                 <div>
                   <div style={{ font: '600 14px/1.15 var(--font-heading)', letterSpacing: '.06em' }}>{line.lineName}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>{line.department}</div>

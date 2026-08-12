@@ -7,6 +7,7 @@ import { fetchLinePerformance } from '@/features/dashboard/queries';
 import { useRealtimeDashboard } from '@/features/dashboard/useRealtimeDashboard';
 import { fetchQualityByLine } from '@/features/quality/queries';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
+import { useTilt } from '@/lib/motion';
 
 export function LinesPage() {
   useRealtimeDashboard();
@@ -20,10 +21,10 @@ export function LinesPage() {
       emptyTitle="No active production lines"
       emptyBody="Add lines in Settings, or insert rows into production_lines.">
       <div className="grid grid--cards">
-        {(data ?? []).map((line) => {
+        {(data ?? []).map((line, i) => {
           const q = quality.data?.[line.lineNumber];
           return (
-          <article key={line.id} className="card">
+          <LineCard key={line.id} index={i}>
             <header style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <span style={{
                 width: 36, height: 36, borderRadius: 9, background: 'var(--blue-50)',
@@ -93,10 +94,29 @@ export function LinesPage() {
                 </p>
               )}
             </div>
-          </article>
+          </LineCard>
           );
         })}
       </div>
     </QueryState>
+  );
+}
+
+/**
+ * A line card is read at a glance rather than worked through, so it is one of the
+ * few surfaces where tilting the whole card helps rather than gets in the way.
+ */
+function LineCard({ index, children }: { index: number; children: React.ReactNode }) {
+  const tilt = useTilt<HTMLElement>(5);
+  return (
+    <article
+      ref={tilt.ref as React.RefObject<HTMLElement>}
+      onPointerMove={tilt.onPointerMove}
+      onPointerLeave={tilt.onPointerLeave}
+      className="card tilt rise"
+      style={{ ['--i' as string]: index }}
+    >
+      {children}
+    </article>
   );
 }
