@@ -541,6 +541,168 @@ export interface Database {
           }
         ];
       };
+      // --- 0006_quality.sql ------------------------------------------------
+      quality_uploads: {
+        Row: {
+          id: string;
+          uploaded_by: string;
+          report_kind: Database['public']['Enums']['quality_report_kind'];
+          original_filename: string;
+          file_hash: string;
+          sheet_names: string[];
+          period_start: string | null;
+          period_end: string | null;
+          inspection_rows: number;
+          defect_rows: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          uploaded_by: string;
+          report_kind: Database['public']['Enums']['quality_report_kind'];
+          original_filename: string;
+          file_hash: string;
+          sheet_names?: string[];
+          period_start?: string | null;
+          period_end?: string | null;
+          inspection_rows?: number;
+          defect_rows?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          uploaded_by?: string;
+          report_kind?: Database['public']['Enums']['quality_report_kind'];
+          original_filename?: string;
+          file_hash?: string;
+          sheet_names?: string[];
+          period_start?: string | null;
+          period_end?: string | null;
+          inspection_rows?: number;
+          defect_rows?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'quality_uploads_uploaded_by_fkey';
+            columns: ['uploaded_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
+
+      quality_inspections: {
+        Row: {
+          id: string;
+          upload_id: string;
+          line_no: number | null;
+          line_label: string | null;
+          is_factory: boolean;
+          style_number: string | null;
+          inspection_date: string | null;
+          period_month: string | null;
+          stage: Database['public']['Enums']['quality_stage'];
+          checked_qty: number | null;
+          pass_qty: number | null;
+          defect_qty: number | null;
+          pass_pct: number | null;
+          defect_pct: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          upload_id: string;
+          line_no?: number | null;
+          line_label?: string | null;
+          is_factory?: boolean;
+          style_number?: string | null;
+          inspection_date?: string | null;
+          period_month?: string | null;
+          stage: Database['public']['Enums']['quality_stage'];
+          checked_qty?: number | null;
+          pass_qty?: number | null;
+          defect_qty?: number | null;
+          pass_pct?: number | null;
+          defect_pct?: number | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          upload_id?: string;
+          line_no?: number | null;
+          line_label?: string | null;
+          is_factory?: boolean;
+          style_number?: string | null;
+          inspection_date?: string | null;
+          period_month?: string | null;
+          stage?: Database['public']['Enums']['quality_stage'];
+          checked_qty?: number | null;
+          pass_qty?: number | null;
+          defect_qty?: number | null;
+          pass_pct?: number | null;
+          defect_pct?: number | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'quality_inspections_upload_id_fkey';
+            columns: ['upload_id'];
+            isOneToOne: false;
+            referencedRelation: 'quality_uploads';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
+
+      quality_defects: {
+        Row: {
+          id: string;
+          upload_id: string;
+          line_no: number | null;
+          line_label: string | null;
+          is_factory: boolean;
+          inspection_date: string | null;
+          period_month: string | null;
+          category: string;
+          qty: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          upload_id: string;
+          line_no?: number | null;
+          line_label?: string | null;
+          is_factory?: boolean;
+          inspection_date?: string | null;
+          period_month?: string | null;
+          category: string;
+          qty?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          upload_id?: string;
+          line_no?: number | null;
+          line_label?: string | null;
+          is_factory?: boolean;
+          inspection_date?: string | null;
+          period_month?: string | null;
+          category?: string;
+          qty?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'quality_defects_upload_id_fkey';
+            columns: ['upload_id'];
+            isOneToOne: false;
+            referencedRelation: 'quality_uploads';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
     };
 
     Views: Record<never, never>;
@@ -548,6 +710,10 @@ export interface Database {
     Functions: {
       current_profile_id: { Args: Record<PropertyKey, never>; Returns: string };
       is_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
+      register_production_line: {
+        Args: { p_line_no: number; p_name?: string | null };
+        Returns: string | null;
+      };
     };
 
     Enums: {
@@ -557,6 +723,9 @@ export interface Database {
       prod_status: 'pending' | 'in_production' | 'at_risk' | 'completed';
       delivery_status: 'on_time' | 'upcoming' | 'delayed' | 'completed';
       processing_state: 'pending' | 'scanning' | 'imported' | 'warnings' | 'failed';
+      quality_stage: 'in_line' | 'end_line' | 'appearance' | 'pre_final' | 'final' | 'aql';
+      quality_report_kind:
+        | 'line_kpi' | 'daily_quality' | 'monthly_quality' | 'monthly_inspection' | 'defect_summary';
     };
 
     CompositeTypes: Record<never, never>;

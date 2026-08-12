@@ -9,6 +9,7 @@ import { friendlyError } from '@/lib/errors';
 import { useAuth } from '@/features/auth/AuthProvider';
 import { downloadOriginal } from '@/features/excel/importService';
 import { fetchAllUploads, fetchMyUploads, groupByDocument } from './queries';
+import { QualityUploadsCard } from '@/features/quality/QualityUploadsCard';
 
 export function UploadHistoryPage() {
   const { profile } = useAuth();
@@ -39,6 +40,7 @@ export function UploadHistoryPage() {
   const base = isAdmin ? '/admin/uploads/' : '/employee/history/';
 
   return (
+    <>
     <Card
       title={isAdmin ? 'All documents' : 'My documents'}
       aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
@@ -100,5 +102,10 @@ export function UploadHistoryPage() {
         </div>
       </QueryState>
     </Card>
+
+    <div style={{ marginTop: 16 }}>
+      <QualityUploadsCard showOwner={isAdmin} />
+    </div>
+    </>
   );
 }

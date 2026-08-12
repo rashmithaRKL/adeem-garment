@@ -5,6 +5,7 @@ import { formatBytes, formatNumber, formatDateTime, compressionRatio } from '@/l
 import { MAX_UPLOAD_BYTES } from '@/lib/env';
 import type { MappableField } from '@/types/domain';
 import { useUploadFlow, SCAN_STAGES } from './useUploadFlow';
+import { STAGE_LABEL } from '@/features/quality/types';
 
 const FIELD_LABELS: Record<MappableField, string> = {
   lineNumber: 'Production line', orderNumber: 'Order number', buyer: 'Buyer',
@@ -19,10 +20,19 @@ const STEPS: { id: string; label: string }[] = [
   { id: 'mapping', label: 'Map' }, { id: 'preview', label: 'Preview' }, { id: 'done', label: 'Import' }
 ];
 
+/**
+ * Steps the stepper has no dot for. Without this the index resolves to -1 and
+ * every dot greys out mid-import, which reads as though the flow had reset.
+ */
+const STEP_ALIAS: Record<string, string> = {
+  duplicate: 'preview', importing: 'preview',
+  quality: 'preview', qualityDuplicate: 'preview', qualityDone: 'done'
+};
+
 export function UploadExcelPage() {
-  const { state, selectFile, setMapping, confirmMapping, runImport, reset } = useUploadFlow();
+  const { state, selectFile, setMapping, confirmMapping, runImport, runQualityImport, reset } = useUploadFlow();
   const inputRef = useRef<HTMLInputElement>(null);
-  const currentIndex = STEPS.findIndex((s) => s.id === state.step);
+  const currentIndex = STEPS.findIndex((s) => s.id === (STEP_ALIAS[state.step] ?? state.step));
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -223,6 +233,121 @@ export function UploadExcelPage() {
             </div>
           </Card>
         </>
+      )}
+
+      {state.step === 'quality' && state.quality && (
+        <>
+          <div className="banner" style={{
+            background: 'var(--blue-50)', border: '1px solid #bfdbfe', color: 'var(--text)',
+            marginBottom: 16, fontSize: 13.5
+          }}>
+            Recognised as a <strong>{state.quality.label}</strong>. This workbook records inspections
+            and defects rather than production output, so it is imported into the quality tables — no
+            column mapping is needed.
+          </div>
+
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', marginBottom: 16 }}>
+            {([
+              ['Sheets read', state.quality.sheetsUsed.length, 'var(--text-muted)'],
+              ['Inspection rows', state.quality.inspections.length, 'var(--green-500)'],
+              ['Defect rows', state.quality.defects.length, 'var(--blue-500)'],
+              ['Sheets skipped', state.quality.sheetsSkipped.length, 'var(--text-faint)'],
+              ['Warnings', state.quality.warnings.length, 'var(--amber-500)']
+            ] as [string, number, string][]).map(([label, n, color]) => (
+              <div className="card" key={label}>
+                <div style={{ font: '600 24px/1 var(--font-heading)', color }}>{formatNumber(n)}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          <Card title="Preview" aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+            nothing is written until you confirm
+          </span>}>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)' }}>
+              Covering {state.quality.periodStart ?? '—'} to {state.quality.periodEnd ?? '—'} ·
+              {' '}sheets used: {state.quality.sheetsUsed.join(', ') || 'none'}
+            </p>
+
+            <div className="table-scroll">
+              <table className="table" style={{ minWidth: 720 }}>
+                <thead>
+                  <tr>
+                    <th>Line</th><th>Date</th><th>Stage</th>
+                    <th className="num">Checked</th><th className="num">Pass</th>
+                    <th className="num">Defects</th><th className="num">Pass %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.quality.inspections.slice(0, 10).map((r, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{r.lineLabel ?? '—'}</td>
+                      <td>{r.inspectionDate ?? r.periodMonth?.slice(0, 7) ?? '—'}</td>
+                      <td>{STAGE_LABEL[r.stage]}</td>
+                      <td className="num">{r.checkedQty != null ? formatNumber(r.checkedQty) : '—'}</td>
+                      <td className="num">{r.passQty != null ? formatNumber(r.passQty) : '—'}</td>
+                      <td className="num">{r.defectQty != null ? formatNumber(r.defectQty) : '—'}</td>
+                      <td className="num">{r.passPct != null ? r.passPct + '%' : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {state.quality.sheetsSkipped.length > 0 && (
+              <p style={{ marginTop: 14, marginBottom: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                Skipped: {state.quality.sheetsSkipped.map((s) => `${s.sheet} (${s.reason})`).join(' · ')}
+              </p>
+            )}
+
+            {state.quality.warnings.map((w) => (
+              <p key={w} className="banner banner--warning" style={{ marginTop: 12, marginBottom: 0 }}>{w}</p>
+            ))}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn--success" onClick={() => void runQualityImport()}
+                disabled={state.quality.inspections.length === 0 && state.quality.defects.length === 0}>
+                Import &amp; update dashboard
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={reset}>Cancel</button>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {state.step === 'qualityDuplicate' && state.qualityDuplicate && (
+        <Card>
+          <h3 style={{ fontSize: 21, margin: '0 0 5px' }}>This report has been uploaded before</h3>
+          <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13.5 }}>
+            The file hash matches an earlier upload. Importing it again would count every
+            inspection twice.
+          </p>
+          <div style={{ background: 'var(--amber-50)', border: '1px solid var(--amber-200)', borderRadius: 10, padding: 14, display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+            <span><strong>File</strong><br />{state.qualityDuplicate.original_filename}</span>
+            <span><strong>Uploaded</strong><br />{formatDateTime(state.qualityDuplicate.created_at)}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn--primary" onClick={() => void runQualityImport(true)}>
+              Import anyway
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={reset}>Cancel</button>
+          </div>
+        </Card>
+      )}
+
+      {state.step === 'qualityDone' && state.qualityResult && (
+        <Card>
+          <h3 style={{ fontSize: 23, margin: '0 0 4px' }}>Quality data imported</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: '0 0 20px' }}>
+            {formatNumber(state.qualityResult.inspections)} inspection rows and{' '}
+            {formatNumber(state.qualityResult.defects)} defect rows written in{' '}
+            {(state.qualityResult.processingMs / 1000).toFixed(1)} s.
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Link className="btn btn--primary" to="/employee/dashboard" style={{ textDecoration: 'none' }}>View dashboard</Link>
+            <button type="button" className="btn btn--secondary" onClick={reset}>Upload another</button>
+          </div>
+        </Card>
       )}
 
       {state.step === 'importing' && (

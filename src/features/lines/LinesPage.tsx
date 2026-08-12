@@ -5,19 +5,24 @@ import { ProgressBar, toneForEfficiency } from '@/components/ProgressBar';
 import { formatNumber, formatPercent, formatDate } from '@/lib/format';
 import { fetchLinePerformance } from '@/features/dashboard/queries';
 import { useRealtimeDashboard } from '@/features/dashboard/useRealtimeDashboard';
+import { fetchQualityByLine } from '@/features/quality/queries';
+import { EFFICIENCY_THRESHOLD } from '@/lib/env';
 
 export function LinesPage() {
   useRealtimeDashboard();
   const { data, isLoading, error } = useQuery({
     queryKey: ['dashboard', 'lines'], queryFn: () => fetchLinePerformance()
   });
+  const quality = useQuery({ queryKey: ['quality', 'byLine'], queryFn: fetchQualityByLine });
 
   return (
     <QueryState isLoading={isLoading} error={error} isEmpty={data?.length === 0}
       emptyTitle="No active production lines"
       emptyBody="Add lines in Settings, or insert rows into production_lines.">
       <div className="grid grid--cards">
-        {(data ?? []).map((line) => (
+        {(data ?? []).map((line) => {
+          const q = quality.data?.[line.lineNumber];
+          return (
           <article key={line.id} className="card">
             <header style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
               <span style={{
@@ -51,8 +56,46 @@ export function LinesPage() {
               <span>Efficiency <strong style={{ color: toneForEfficiency(line.efficiency) }}>{formatPercent(line.efficiency)}</strong></span>
               <span>Progress {formatPercent(line.progress, 0)}</span>
             </p>
+
+            {/* Quality stands on its own: these lines are known from inspection
+                reports, which say nothing about output against target. */}
+            <div style={{ borderTop: '1px solid var(--border-soft)', marginTop: 14, paddingTop: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+                Quality
+              </div>
+              {q ? (
+                <>
+                  <div className="grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', textAlign: 'center', gap: 10 }}>
+                    <div>
+                      <div style={{ font: '600 18px/1 var(--font-heading)',
+                        color: q.passPct != null && q.passPct < EFFICIENCY_THRESHOLD ? 'var(--red-500)' : 'var(--blue-500)' }}>
+                        {q.passPct != null ? q.passPct.toFixed(1) + '%' : '—'}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Pass rate</div>
+                    </div>
+                    <div>
+                      <div style={{ font: '600 18px/1 var(--font-heading)' }}>{formatNumber(q.checked)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Checked</div>
+                    </div>
+                    <div>
+                      <div style={{ font: '600 18px/1 var(--font-heading)' }}>{formatNumber(q.defects)}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Defects</div>
+                    </div>
+                  </div>
+                  <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--text-faint)' }}>
+                    {q.stages} inspection stage{q.stages === 1 ? '' : 's'}
+                    {q.lastSeen ? ' · latest ' + q.lastSeen : ''}
+                  </p>
+                </>
+              ) : (
+                <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
+                  No inspection data imported for this line yet.
+                </p>
+              )}
+            </div>
           </article>
-        ))}
+          );
+        })}
       </div>
     </QueryState>
   );

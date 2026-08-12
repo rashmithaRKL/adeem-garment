@@ -5,6 +5,7 @@ import { QueryState } from '@/components/QueryState';
 import { StatusChip } from '@/components/StatusChip';
 import { formatBytes, formatDateTime, compressionRatio, formatNumber } from '@/lib/format';
 import { fetchAllUploads } from './queries';
+import { QualityUploadsCard } from '@/features/quality/QualityUploadsCard';
 
 export function UploadsPage() {
   const { data, isLoading, error } = useQuery({ queryKey: ['uploads', 'all'], queryFn: fetchAllUploads });
@@ -72,6 +73,10 @@ export function UploadsPage() {
           </div>
         </QueryState>
       </Card>
+
+      <div style={{ marginTop: 16 }}>
+        <QualityUploadsCard showOwner />
+      </div>
     </>
   );
 }

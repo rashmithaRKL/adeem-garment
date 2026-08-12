@@ -20,8 +20,20 @@ export function AnalyticsPage() {
   const buyerPeak = Math.max(1, ...buyerMix.map(([, q]) => q));
   const trendPeak = Math.max(1, ...(trend.data ?? []).map((d) => Math.max(d.target, d.actual)));
 
+  // Every panel on this page is derived from production output. Saying so once,
+  // at the top, beats three cards that each render as an unexplained empty box.
+  const noProduction = (lines.data ?? []).length === 0 && (orders.data ?? []).length === 0;
+
   return (
     <QueryState isLoading={lines.isLoading || orders.isLoading} error={lines.error ?? orders.error}>
+      {noProduction && (
+        <p className="banner banner--info" style={{ marginBottom: 16 }}>
+          These panels chart production output — efficiency against target, order volume by buyer,
+          and daily target versus actual. There are no production lines, orders or production records
+          yet, so they are empty. Quality reports do not feed this page; their figures are on the
+          Dashboard under Quality.
+        </p>
+      )}
       <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))' }}>
         <Card title="Efficiency by line">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>

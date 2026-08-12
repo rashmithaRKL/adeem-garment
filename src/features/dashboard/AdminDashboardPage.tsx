@@ -7,6 +7,7 @@ import { ProgressBar, toneForEfficiency } from '@/components/ProgressBar';
 import { formatNumber, formatPercent } from '@/lib/format';
 import { fetchDashboardKpis, fetchLinePerformance, fetchOutputTrend } from './queries';
 import { useRealtimeDashboard, useDashboardKeys } from './useRealtimeDashboard';
+import { QualitySection } from '@/features/quality/QualitySection';
 
 export function AdminDashboardPage() {
   useRealtimeDashboard();
@@ -37,6 +38,14 @@ export function AdminDashboardPage() {
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1.55fr) minmax(0,1fr)', marginTop: 16 }}>
         <Card title="Production lines" aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>today · target vs actual</span>}>
+          {(lines.data ?? []).length === 0 && (
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              No production lines are set up yet, so there is nothing to chart here.
+              {' '}This panel tracks output against target — it fills once a production sheet
+              {' '}with line, order, target and produced quantities is imported. The quality
+              {' '}reports below come from a different set of workbooks and do not feed it.
+            </p>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {(lines.data ?? []).map((line) => (
               <div key={line.id} style={{ display: 'grid', gridTemplateColumns: '120px minmax(0,1fr) 92px 100px', alignItems: 'center', gap: 14, padding: '11px 8px' }}>
@@ -69,7 +78,12 @@ export function AdminDashboardPage() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <Card title="Output — last 7 days">
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9, height: 140 }}>
+            {(trend.data ?? []).length === 0 && (
+              <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-muted)' }}>
+                No production records in the last 7 days.
+              </p>
+            )}
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9, height: (trend.data ?? []).length ? 140 : 0 }}>
               {(trend.data ?? []).map((d) => (
                 <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, height: '100%', justifyContent: 'flex-end' }}>
                   <span style={{ font: '600 10.5px var(--font-body)', color: 'var(--text-faint)' }}>{formatNumber(d.actual)}</span>
@@ -98,6 +112,14 @@ export function AdminDashboardPage() {
           </Card>
         </div>
       </div>
+
+      <h2 style={{
+        font: '600 15px var(--font-heading)', letterSpacing: '.08em', textTransform: 'uppercase',
+        color: 'var(--text-muted)', margin: '26px 0 0'
+      }}>
+        Quality
+      </h2>
+      <QualitySection />
     </QueryState>
   );
 }

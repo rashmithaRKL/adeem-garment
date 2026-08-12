@@ -6,8 +6,15 @@ import { parseWorkbook, validateRows, type ParsedWorkbook } from './parseWorkboo
 import { hashFile } from './hash';
 import { missingRequired } from './columnDetection';
 import { importWorkbook, validateFile, type ImportResult, type DuplicateResult } from './importService';
+import { useAuth } from '@/features/auth/AuthProvider';
+import { tryParseQualityFile } from '@/features/quality/parseQuality';
+import { importQuality, type QualityImportResult } from '@/features/quality/importQuality';
+import type { QualityParseResult } from '@/features/quality/types';
 
-export type FlowStep = 'select' | 'scanning' | 'duplicate' | 'mapping' | 'preview' | 'importing' | 'done';
+export type FlowStep =
+  | 'select' | 'scanning' | 'duplicate' | 'mapping' | 'preview' | 'importing' | 'done'
+  // the quality reports take their own preview screen: they have no columns to map
+  | 'quality' | 'qualityDuplicate' | 'qualityDone';
 
 export interface ScanStage { label: string; detail: string; }
 
@@ -24,6 +31,7 @@ export const SCAN_STAGES: ScanStage[] = [
 interface FlowState {
   step: FlowStep;
   file: File | null;
+  fileHash: string;
   parsed: ParsedWorkbook | null;
   scan: ScanResult | null;
   mappings: ColumnMapping[];
@@ -31,16 +39,21 @@ interface FlowState {
   importPercent: number;
   result: ImportResult | null;
   duplicate: DuplicateResult['previousUpload'] | null;
+  quality: QualityParseResult | null;
+  qualityResult: QualityImportResult | null;
+  qualityDuplicate: { id: string; original_filename: string; created_at: string } | null;
   error: string;
 }
 
 const INITIAL: FlowState = {
-  step: 'select', file: null, parsed: null, scan: null, mappings: [],
-  stageIndex: 0, importPercent: 0, result: null, duplicate: null, error: ''
+  step: 'select', file: null, fileHash: '', parsed: null, scan: null, mappings: [],
+  stageIndex: 0, importPercent: 0, result: null, duplicate: null,
+  quality: null, qualityResult: null, qualityDuplicate: null, error: ''
 };
 
 export function useUploadFlow() {
   const queryClient = useQueryClient();
+  const { profile } = useAuth();
   const [state, setState] = useState<FlowState>(INITIAL);
 
   const reset = useCallback(() => setState(INITIAL), []);
@@ -53,7 +66,16 @@ export function useUploadFlow() {
       setState((s) => ({ ...s, stageIndex: 1 }));
 
       const fileHash = await hashFile(file);
-      setState((s) => ({ ...s, stageIndex: 2 }));
+      setState((s) => ({ ...s, stageIndex: 2, fileHash }));
+
+      // The quality reports carry no order number, target or produced quantity,
+      // so they can never satisfy the production importer. Recognise them first
+      // and send them down their own path rather than failing every row.
+      const quality = await tryParseQualityFile(file);
+      if (quality) {
+        setState((s) => ({ ...s, stageIndex: SCAN_STAGES.length, quality, step: 'quality' }));
+        return;
+      }
 
       const parsed = await parseWorkbook(file);
       setState((s) => ({ ...s, stageIndex: 4, parsed, mappings: parsed.mappings }));
@@ -134,5 +156,35 @@ export function useUploadFlow() {
     }
   }, [state, queryClient]);
 
-  return { state, selectFile, setMapping, confirmMapping, runImport, reset };
+  const runQualityImport = useCallback(async (allowDuplicate = false) => {
+    const { file, fileHash, quality } = state;
+    if (!file || !quality) return;
+    if (!profile) {
+      setState((s) => ({ ...s, error: 'Your profile could not be resolved, so the import has no owner.' }));
+      return;
+    }
+
+    setState((s) => ({ ...s, step: 'importing', importPercent: 20, error: '' }));
+    const tick = setInterval(
+      () => setState((s) => ({ ...s, importPercent: Math.min(s.importPercent + 9, 92) })),
+      260
+    );
+
+    try {
+      const response = await importQuality(quality, file, fileHash, profile.id, { allowDuplicate });
+      if ('duplicate' in response) {
+        setState((s) => ({ ...s, step: 'qualityDuplicate', qualityDuplicate: response.previous }));
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: ['quality'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      setState((s) => ({ ...s, step: 'qualityDone', importPercent: 100, qualityResult: response }));
+    } catch (err) {
+      setState((s) => ({ ...s, step: 'quality', error: friendlyError(err) }));
+    } finally {
+      clearInterval(tick);
+    }
+  }, [state, profile, queryClient]);
+
+  return { state, selectFile, setMapping, confirmMapping, runImport, runQualityImport, reset };
 }

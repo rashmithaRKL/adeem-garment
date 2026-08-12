@@ -14,6 +14,19 @@ export interface ParsedWorkbook {
 }
 
 /**
+ * sheet_to_json leaves a hole - not a value - wherever a cell is empty or has been
+ * swallowed by a merge, and real production sheets are full of both. JavaScript's
+ * array methods then disagree about those holes: map, forEach, some and filter skip
+ * them, but findIndex visits every index and hands the callback `undefined`. That
+ * mismatch crashed the scan, because a sparse header row produced a sparse mapping
+ * array and validateRows' findIndex then read `.field` off a hole.
+ *
+ * Densifying once, here, is what keeps every downstream call site honest.
+ */
+const densify = (row: unknown[]): unknown[] =>
+  Array.from({ length: row.length }, (_, i) => row[i] ?? null);
+
+/**
  * Production sheets rarely start on row 1 - there is usually a title block.
  * The header row is the first row where at least three cells are non-empty text.
  */
@@ -32,7 +45,9 @@ export async function parseWorkbook(file: File): Promise<ParsedWorkbook> {
   if (!sheetName) throw new Error('The workbook contains no sheets.');
 
   const sheet = workbook.Sheets[sheetName]!;
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false });
+  const rows = XLSX.utils
+    .sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false })
+    .map(densify);
 
   const headerRowIndex = findHeaderRow(rows);
   const headers = (rows[headerRowIndex] ?? []).map((h) => String(h ?? '').trim());

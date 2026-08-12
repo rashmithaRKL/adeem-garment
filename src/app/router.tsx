@@ -19,6 +19,7 @@ import { SettingsPage } from '@/features/settings/SettingsPage';
 
 import { EmployeeDashboardPage } from '@/features/dashboard/EmployeeDashboardPage';
 import { EmployeeProductionPage } from '@/features/lines/EmployeeProductionPage';
+import { UploadExcelPage } from '@/features/excel/UploadExcelPage';
 import { NotificationsPage } from '@/features/notifications/NotificationsPage';
 import { ProfilePage } from '@/features/auth/ProfilePage';
 
