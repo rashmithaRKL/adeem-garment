@@ -1,4 +1,0 @@
-# Client-side routing: any path that is not a real file is served the SPA shell,
-# so /admin/employees survives a hard refresh or a pasted link.
-# Static assets are matched before this rule, so /assets/* is unaffected.
-/*    /index.html   200
