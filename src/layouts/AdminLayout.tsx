@@ -1,15 +1,15 @@
 import { AppShell, type NavItem } from './AppShell';
 
 const items: NavItem[] = [
-  { to: '/admin/dashboard',  label: 'Dashboard',        icon: '⌂' },
-  { to: '/admin/lines',      label: 'Production Lines', icon: '⛭' },
-  { to: '/admin/orders',     label: 'Orders',           icon: '▤' },
-  { to: '/admin/analytics',  label: 'Analytics',        icon: '◫' },
-  { to: '/admin/uploads',    label: 'Excel Uploads',    icon: '▣' },
-  { to: '/admin/history',    label: 'Upload History',   icon: '◷' },
-  { to: '/admin/employees',  label: 'Employees',        icon: '☰' },
-  { to: '/admin/audit-logs', label: 'Audit Logs',       icon: '❑' },
-  { to: '/admin/settings',   label: 'Settings',         icon: '⚙' }
+  { to: '/admin/dashboard',  label: 'Dashboard',        icon: '🏠' },
+  { to: '/admin/lines',      label: 'Production Lines', icon: '🏭' },
+  { to: '/admin/orders',     label: 'Orders',           icon: '📋' },
+  { to: '/admin/analytics',  label: 'Analytics',        icon: '📊' },
+  { to: '/admin/uploads',    label: 'Excel Uploads',    icon: '📁' },
+  { to: '/admin/history',    label: 'Upload History',   icon: '🕐' },
+  { to: '/admin/employees',  label: 'Employees',        icon: '👥' },
+  { to: '/admin/audit-logs', label: 'Audit Logs',       icon: '🛡️' },
+  { to: '/admin/settings',   label: 'Settings',         icon: '⚙️' }
 ];
 
 const titles = {

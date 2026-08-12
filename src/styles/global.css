@@ -39,10 +39,20 @@ input:focus-visible {
   padding: var(--space-5) var(--space-5) var(--space-4);
   border-bottom: 1px solid var(--border-soft);
 }
-.sidebar__mark {
-  width: 34px; height: 34px; border-radius: 8px; color: #fff;
-  background: linear-gradient(140deg, var(--blue-500), var(--cyan-500));
-  display: grid; place-items: center; font: 700 15px var(--font-heading);
+.sidebar__brand { flex-direction: column; align-items: flex-start; gap: 6px; }
+/* Height-bound, not width-bound: the source logo is wider than it is tall, and
+   capping the width would leave it swimming in the narrow rail. */
+.sidebar__logo { height: 38px; width: auto; max-width: 100%; display: block; }
+.sidebar__brand-sub {
+  font: 500 10.5px var(--font-body); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-faint);
+}
+/* Emoji come from the system font at their own colour, so this sets only the box
+   they sit in. The fixed width keeps every label on one left edge however wide a
+   given glyph renders, and line-height 1 stops the taller ones adding row height. */
+.navlink__icon {
+  width: 22px; flex: none; display: grid; place-items: center;
+  font-size: 15px; line-height: 1;
 }
 .sidebar__nav { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 2px; }
 .sidebar__group {

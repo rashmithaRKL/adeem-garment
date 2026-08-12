@@ -1,9 +1,14 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/features/auth/AuthProvider';
+// Imported rather than referenced from adeemuniform.com: the CSP in public/_headers
+// sets img-src to 'self' data: blob:, so a remote logo would be blocked outright.
+// Importing also lets Vite fingerprint the file, so a new logo can never be cached.
+import logoUrl from '@/assets/adeem-logo.png';
 
 export interface NavItem {
   to: string;
   label: string;
+  /** An emoji. Colour comes from the system emoji font, so no token applies. */
   icon: string;
   badge?: number;
 }
@@ -25,13 +30,10 @@ export function AppShell({ group, items, titles }: AppShellProps) {
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar__brand">
-          <span className="sidebar__mark" aria-hidden>AG</span>
-          <span>
-            <span style={{ display: 'block', font: '600 15px/1.1 var(--font-heading)', letterSpacing: '.05em', textTransform: 'uppercase' }}>
-              Adeem Garment
-            </span>
-            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Production MS</span>
-          </span>
+          {/* The logo already reads "ADEEM UNIFORM", so repeating it in text beside
+              the mark would say the same thing twice. Only the system name follows. */}
+          <img src={logoUrl} alt="Adeem Uniform" className="sidebar__logo" />
+          <span className="sidebar__brand-sub">Production Management</span>
         </div>
 
         <nav className="sidebar__nav" aria-label={group}>
@@ -42,7 +44,9 @@ export function AppShell({ group, items, titles }: AppShellProps) {
               to={item.to}
               className={({ isActive }) => 'navlink' + (isActive ? ' navlink--active' : '')}
             >
-              <span style={{ width: 22, display: 'grid', placeItems: 'center' }} aria-hidden>{item.icon}</span>
+              {/* Decorative: the label beside it names the destination, so a screen
+                  reader announcing "house emoji Dashboard" would only add noise. */}
+              <span className="navlink__icon" aria-hidden>{item.icon}</span>
               <span>{item.label}</span>
               {item.badge ? <span className="navlink__badge">{item.badge}</span> : null}
             </NavLink>

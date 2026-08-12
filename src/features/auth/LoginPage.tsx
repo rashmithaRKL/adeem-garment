@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 import { friendlyError } from '@/lib/errors';
+import logoUrl from '@/assets/adeem-logo.png';
 
 export function LoginPage() {
   const { session, loading, signIn } = useAuth();
@@ -31,10 +32,14 @@ export function LoginPage() {
         padding: '56px 60px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
         color: '#fff', background: 'linear-gradient(160deg,#1e3a8a 0%,#2563eb 55%,#0891b2 100%)'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ width: 38, height: 38, borderRadius: 9, background: '#fff', color: 'var(--blue-500)', display: 'grid', placeItems: 'center', font: '700 18px var(--font-heading)' }}>AG</span>
-          <span style={{ font: '600 19px/1 var(--font-heading)', letterSpacing: '.06em', textTransform: 'uppercase' }}>
-            Adeem Garment · PMS
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {/* White plate behind the logo: it is drawn for light backgrounds and its
+              navy wordmark disappears against this panel's blue gradient. */}
+          <span style={{ background: '#fff', borderRadius: 10, padding: '8px 12px', display: 'grid', placeItems: 'center' }}>
+            <img src={logoUrl} alt="Adeem Uniform" style={{ height: 34, width: 'auto', display: 'block' }} />
+          </span>
+          <span style={{ font: '600 15px/1.2 var(--font-heading)', letterSpacing: '.09em', textTransform: 'uppercase', opacity: .85 }}>
+            Production<br />Management
           </span>
         </div>
         <div>
