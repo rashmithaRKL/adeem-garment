@@ -1,0 +1,35 @@
+:root {
+  /* Colour is used semantically, never decoratively.
+     Blue production, green good, amber warning, red delayed, purple orders,
+     orange pending, cyan analytics. */
+  --blue-50:#eff6ff;  --blue-500:#2563eb; --blue-600:#1d4ed8; --blue-900:#1e3a8a;
+  --green-50:#ecfdf5; --green-500:#16a34a; --green-600:#15803d; --green-200:#bbf7d0;
+  --amber-50:#fffbeb; --amber-500:#d97706; --amber-200:#fde68a;
+  --red-50:#fef2f2;   --red-500:#dc2626;   --red-200:#fecaca;
+  --purple-50:#f5f3ff;--purple-500:#7c3aed;
+  --orange-50:#fff7ed;--orange-500:#ea580c;
+  --cyan-50:#ecfeff;  --cyan-500:#0891b2;
+
+  --page:#f4f6fa;
+  --surface:#ffffff;
+  --surface-muted:#f8fafc;
+  --border:#e6eaf0;
+  --border-soft:#eef2f7;
+  --text:#0f172a;
+  --text-muted:#475569;
+  --text-faint:#94a3b8;
+
+  --radius-sm:7px;
+  --radius:9px;
+  --radius-lg:12px;
+
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
+  --space-5:20px; --space-6:26px; --space-8:40px;
+
+  --shadow-sm:0 1px 2px rgba(15,23,42,.04);
+  --shadow-md:0 6px 16px rgba(37,99,235,.28);
+
+  --font-heading:'Barlow Condensed', system-ui, sans-serif;
+  --font-body:'Barlow', system-ui, sans-serif;
+  --font-mono:ui-monospace, Menlo, monospace;
+}

@@ -1,0 +1,106 @@
+export type UserRole = 'admin' | 'employee';
+export type UserStatus = 'active' | 'disabled';
+export type LineStatus = 'running' | 'behind' | 'changeover' | 'idle';
+export type ProcessingState = 'pending' | 'scanning' | 'imported' | 'warnings' | 'failed';
+
+export interface Profile {
+  id: string;
+  authUserId: string;
+  fullName: string;
+  employeeId: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+}
+
+export interface LinePerformance {
+  id: string;
+  lineNumber: number;
+  lineName: string;
+  department: string | null;
+  status: LineStatus;
+  target: number;
+  actual: number;
+  balance: number;
+  efficiency: number;
+  progress: number;
+  currentOrder: string | null;
+  buyer: string | null;
+  styleNumber: string | null;
+  deliveryDate: string | null;
+}
+
+export interface DashboardKpis {
+  todayTarget: number;
+  todayActual: number;
+  achievement: number;
+  avgEfficiency: number;
+  activeOrders: number;
+  completedOrders: number;
+  pendingOrders: number;
+  orderedQuantity: number;
+  producedQuantity: number;
+  remainingQuantity: number;
+  onTime: number;
+  upcoming: number;
+  delayed: number;
+  completed: number;
+}
+
+/** One validated row on its way into production_records. */
+export interface ImportRow {
+  rowNumber: number;
+  lineNumber: number;
+  orderNumber: string;
+  productionDate: string;
+  targetQuantity: number;
+  actualQuantity: number;
+  efficiency: number | null;
+  /**
+   * Order attributes carried alongside the production figures. A sheet often
+   * names an order the database has never seen; these let the importer create
+   * it instead of dropping the row's link to it.
+   */
+  order: ImportOrderFields;
+  raw: Record<string, unknown>;
+}
+
+export interface ImportOrderFields {
+  buyer: string | null;
+  styleNumber: string | null;
+  productName: string | null;
+  color: string | null;
+  size: string | null;
+  orderQuantity: number | null;
+  deliveryDate: string | null;
+}
+
+export interface RowIssue {
+  rowNumber: number;
+  column: string;
+  message: string;
+}
+
+export interface ScanResult {
+  fileName: string;
+  fileSize: number;
+  fileHash: string;
+  sheetCount: number;
+  rowCount: number;
+  columnCount: number;
+  mappings: ColumnMapping[];
+  rows: ImportRow[];
+  warnings: RowIssue[];
+  errors: (RowIssue & { type: string })[];
+}
+
+export interface ColumnMapping {
+  excelHeader: string;
+  field: MappableField | null;
+  confidence: 'high' | 'low' | 'unmapped';
+}
+
+export type MappableField =
+  | 'lineNumber' | 'orderNumber' | 'buyer' | 'styleNumber' | 'productName'
+  | 'color' | 'size' | 'orderQuantity' | 'targetQuantity' | 'actualQuantity'
+  | 'efficiency' | 'productionDate' | 'deliveryDate' | 'remarks';
