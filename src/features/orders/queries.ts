@@ -27,3 +27,22 @@ export async function fetchOrders(): Promise<OrderRow[]> {
   if (error) throw error;
   return (data ?? []) as unknown as OrderRow[];
 }
+
+/**
+ * Production records reference the order they belong to, so Postgres blocks the
+ * delete rather than orphaning them. That is the right default here: an order
+ * with output recorded against it is history, not clutter.
+ */
+export async function deleteOrder(id: string) {
+  const { error } = await supabase.from('orders').delete().eq('id', id);
+  if (error) {
+    if (error.code === '23503') {
+      throw new Error(
+        'This order has production records attached, so deleting it would destroy '
+        + 'that output history. Remove the import that created them first, or leave '
+        + 'the order in place.'
+      );
+    }
+    throw new Error(error.message);
+  }
+}

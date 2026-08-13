@@ -1,28 +1,33 @@
 import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { QueryState } from '@/components/QueryState';
+import { Donut, BarChart, LineChart, RankedBars, toSlices } from '@/components/charts';
 import { formatNumber, formatPercent } from '@/lib/format';
 import { toneForEfficiency } from '@/components/ProgressBar';
 import { fetchLinePerformance, fetchOutputTrend } from '@/features/dashboard/queries';
 import { fetchOrders } from '@/features/orders/queries';
+
+const weekday = (iso: string): string =>
+  new Date(iso).toLocaleDateString('en-GB', { weekday: 'short' });
 
 export function AnalyticsPage() {
   const lines = useQuery({ queryKey: ['dashboard', 'lines'], queryFn: () => fetchLinePerformance() });
   const trend = useQuery({ queryKey: ['dashboard', 'trend'], queryFn: () => fetchOutputTrend(7) });
   const orders = useQuery({ queryKey: ['orders'], queryFn: fetchOrders });
 
-  const buyerMix = Object.entries(
-    (orders.data ?? []).reduce<Record<string, number>>((acc, o) => {
-      acc[o.buyer] = (acc[o.buyer] ?? 0) + o.order_quantity;
+  const orderRows = orders.data ?? [];
+  const buyerMix = toSlices(
+    [...orderRows.reduce((acc, o) => {
+      acc.set(o.buyer, (acc.get(o.buyer) ?? 0) + o.order_quantity);
       return acc;
-    }, {})
-  ).sort((a, b) => b[1] - a[1]);
-  const buyerPeak = Math.max(1, ...buyerMix.map(([, q]) => q));
-  const trendPeak = Math.max(1, ...(trend.data ?? []).map((d) => Math.max(d.target, d.actual)));
+    }, new Map<string, number>())].map(([buyer, qty]) => ({ buyer, qty })),
+    (r) => r.buyer,
+    (r) => r.qty
+  );
 
   // Every panel on this page is derived from production output. Saying so once,
   // at the top, beats three cards that each render as an unexplained empty box.
-  const noProduction = (lines.data ?? []).length === 0 && (orders.data ?? []).length === 0;
+  const noProduction = (lines.data ?? []).length === 0 && orderRows.length === 0;
 
   return (
     <QueryState isLoading={lines.isLoading || orders.isLoading} error={lines.error ?? orders.error}>
@@ -31,58 +36,71 @@ export function AnalyticsPage() {
           These panels chart production output — efficiency against target, order volume by buyer,
           and daily target versus actual. There are no production lines, orders or production records
           yet, so they are empty. Quality reports do not feed this page; their figures are on the
-          Dashboard under Quality.
+          Dashboard under Quality and on Quality Management.
         </p>
       )}
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))' }}>
-        <Card title="Efficiency by line">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-            {(lines.data ?? []).map((l) => (
-              <div key={l.id} style={{ display: 'grid', gridTemplateColumns: '78px minmax(0,1fr) 60px', alignItems: 'center', gap: 12 }}>
-                <span style={{ font: '600 13px var(--font-heading)', letterSpacing: '.06em' }}>{l.lineName}</span>
-                <div style={{ height: 22, borderRadius: 6, background: 'var(--surface-muted)', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: Math.min(100, l.efficiency) + '%', background: toneForEfficiency(l.efficiency), borderRadius: 6 }} />
-                </div>
-                <span style={{ textAlign: 'right', font: '600 13px var(--font-body)', color: toneForEfficiency(l.efficiency) }}>
-                  {formatPercent(l.efficiency)}
-                </span>
-              </div>
-            ))}
-          </div>
+
+      <div className="grid grid--split">
+        <Card title="Efficiency by line"
+          aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>today</span>}>
+          <RankedBars
+            max={100}
+            rows={(lines.data ?? []).map((l) => ({
+              label: l.lineName,
+              value: Math.min(100, l.efficiency),
+              suffix: formatPercent(l.efficiency),
+              // Efficiency is judged, not just ranked, so the colour is the
+              // verdict — the same one the Production Line screen gives.
+              color: toneForEfficiency(l.efficiency),
+              hint: `${formatNumber(l.actual)} of ${formatNumber(l.target)}`
+            }))}
+            empty="No lines with output recorded today."
+          />
         </Card>
 
         <Card title="Order volume by buyer">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-            {buyerMix.map(([buyer, qty]) => (
-              <div key={buyer} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,130px) minmax(0,1fr) 72px', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{buyer}</span>
-                <div style={{ height: 22, borderRadius: 6, background: 'var(--surface-muted)', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: (qty / buyerPeak) * 100 + '%', background: 'var(--purple-500)', borderRadius: 6 }} />
-                </div>
-                <span style={{ textAlign: 'right', font: '600 13px var(--font-body)', color: 'var(--text-muted)' }}>{formatNumber(qty)}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card title="Target vs actual — last 7 days" style={{ gridColumn: '1 / -1' }}>
-          <p style={{ fontSize: 12, color: 'var(--text-faint)', margin: '0 0 18px' }}>Grey bar = target, blue bar = achieved</p>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 20, height: 200 }}>
-            {(trend.data ?? []).map((d) => (
-              <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, height: '100%', justifyContent: 'flex-end' }}>
-                <span style={{ font: '600 12px var(--font-body)', color: 'var(--text-muted)' }}>{formatNumber(d.actual)}</span>
-                <div style={{ width: '100%', display: 'flex', alignItems: 'flex-end', gap: 5, height: 140 }}>
-                  <div style={{ flex: 1, height: (d.target / trendPeak) * 100 + '%', background: 'var(--border)', borderRadius: '5px 5px 2px 2px' }} />
-                  <div style={{ flex: 1, height: (d.actual / trendPeak) * 100 + '%', background: 'var(--blue-500)', borderRadius: '5px 5px 2px 2px' }} />
-                </div>
-                <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
-                  {new Date(d.date).toLocaleDateString('en-GB', { weekday: 'short' })}
-                </span>
-              </div>
-            ))}
-          </div>
+          <Donut
+            size={162}
+            centerLabel="pieces ordered"
+            slices={buyerMix}
+            empty="No orders on the system yet."
+          />
         </Card>
       </div>
+
+      <Card title="Target versus achieved — last 7 days" style={{ marginTop: 16 }}>
+        <BarChart
+          height={250}
+          data={(trend.data ?? []).map((d) => ({
+            label: weekday(d.date),
+            values: { target: d.target, actual: d.actual }
+          }))}
+          series={[
+            { key: 'target', label: 'Target', color: 'var(--chart-4)' },
+            { key: 'actual', label: 'Produced', color: 'var(--chart-1)' }
+          ]}
+          empty="No production records in the last 7 days."
+        />
+      </Card>
+
+      <Card title="Achievement against target" style={{ marginTop: 16 }}
+        aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+          produced ÷ target, day by day
+        </span>}>
+        <LineChart
+          domain="percent"
+          area
+          height={220}
+          threshold={{ value: 100, label: '100% of target' }}
+          format={(n) => n.toFixed(1) + '%'}
+          points={(trend.data ?? []).map((d) => ({
+            label: weekday(d.date),
+            values: { achievement: d.target > 0 ? Math.round((d.actual / d.target) * 1000) / 10 : 0 }
+          }))}
+          series={[{ key: 'achievement', label: 'Achievement', color: 'var(--chart-3)' }]}
+          empty="Two or more days of production are needed before a trend means anything."
+        />
+      </Card>
     </QueryState>
   );
 }

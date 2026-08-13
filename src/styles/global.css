@@ -43,10 +43,17 @@ input:focus-visible {
 /* Height-bound, not width-bound: the source logo is wider than it is tall, and
    capping the width would leave it swimming in the narrow rail. */
 .sidebar__logo { height: 38px; width: auto; max-width: 100%; display: block; }
+.sidebar__brand-name {
+  font: 600 13px/1.2 var(--font-heading); letter-spacing: .05em;
+  text-transform: uppercase; color: var(--text);
+}
 .sidebar__brand-sub {
   font: 500 10.5px var(--font-body); letter-spacing: .1em;
   text-transform: uppercase; color: var(--text-faint);
 }
+/* Groups of links, each under its own heading. */
+.sidebar__section { display: flex; flex-direction: column; gap: 2px; }
+.sidebar__section + .sidebar__section { margin-top: 10px; }
 /* Emoji come from the system font at their own colour, so this sets only the box
    they sit in. The fixed width keeps every label on one left edge however wide a
    given glyph renders, and line-height 1 stops the taller ones adding row height. */
@@ -254,6 +261,7 @@ input:focus-visible {
   .navlink--active::before { animation: none; }
   /* A dot that never stops pulsing is the worst offender of the lot. */
   .live-pill__dot::after { animation: none; display: none; }
+  .modal, .modal__backdrop { animation: none; }
 }
 .card__title {
   font: 600 17px var(--font-heading); letter-spacing: .04em;
@@ -277,6 +285,79 @@ input:focus-visible {
 
 .bar { height: 9px; border-radius: 5px; background: var(--border-soft); overflow: hidden; }
 .bar__fill { height: 100%; border-radius: 5px; transition: width .6s cubic-bezier(.4,0,.2,1); }
+
+/* Splits a long dashboard into named stretches, so a scroll past four cards
+   arrives somewhere rather than just further down. */
+.section-heading {
+  font: 600 15px var(--font-heading); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-muted); margin: 26px 0 0;
+}
+
+/* A two-way switch between views of the same data. Both options stay on screen,
+   because the point is that the other one exists. */
+.segmented {
+  display: inline-flex; background: var(--surface-muted); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 3px; gap: 3px; flex: none;
+}
+.segmented__btn {
+  border: 0; background: transparent; color: var(--text-muted); cursor: pointer;
+  font: 600 12.5px var(--font-body); padding: 7px 15px; border-radius: 6px;
+  transition: background .18s ease, color .18s ease;
+}
+.segmented__btn:hover { color: var(--text); }
+.segmented__btn--on { background: var(--surface); color: var(--blue-600); box-shadow: var(--shadow-sm); }
+
+/* ---------- charts ----------
+   The box is the positioning context for the hover tooltip and the element the
+   charts measure themselves against, so it must not be given padding: the plot
+   is drawn at the measured width and would then overflow it. */
+.chartbox { position: relative; width: 100%; }
+
+.charttip {
+  position: absolute; z-index: 5; pointer-events: none;
+  transform: translate(-50%, -100%);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 9px; box-shadow: var(--shadow-lift);
+  padding: 8px 10px; min-width: 118px; max-width: 240px;
+}
+.charttip__title {
+  font: 600 11.5px var(--font-body); color: var(--text);
+  letter-spacing: .04em; margin-bottom: 5px; white-space: nowrap;
+}
+.charttip__row { display: flex; align-items: center; gap: 7px; font-size: 11.5px; line-height: 1.7; }
+.charttip__swatch { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.charttip__label { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.charttip__value { margin-left: auto; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* Identity is never carried by colour alone, so a legend ships with every chart
+   that has more than one series. */
+.legend {
+  list-style: none; margin: 12px 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+}
+.legend--col { flex-direction: column; gap: 7px; flex: 1 1 170px; margin: 0; min-width: 0; }
+.legend__item { display: flex; align-items: center; gap: 7px; font-size: 12px; min-width: 0; }
+.legend__swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.legend__label { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legend__value {
+  margin-left: auto; padding-left: 8px; color: var(--text); font-weight: 600;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+.donut { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+
+/* Bars rise from the axis rather than appearing at full height. */
+@keyframes grow-y { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.grow-y {
+  transform-box: fill-box; transform-origin: bottom center;
+  animation: grow-y .6s cubic-bezier(.22,.61,.36,1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+.donut__seg { transition: opacity .18s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .grow-y { animation: none; transform: none; }
+}
 
 .table-scroll { overflow-x: auto; }
 .table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13.5px; }
@@ -342,6 +423,7 @@ input:focus-visible {
 }
 .banner--info { background: var(--blue-50); border: 1px solid var(--info-border); color: var(--blue-900); }
 .banner--error { background: var(--red-50); border: 1px solid var(--red-200); color: var(--red-500); }
+.banner--warning { background: var(--amber-50); border: 1px solid var(--amber-200); color: var(--text); }
 
 /* ---------- responsive: supervisors upload from the floor ----------
    These pages are read on a phone at the end of a line as often as at a desk, so
@@ -353,6 +435,46 @@ input:focus-visible {
 .grid--kpi--3     { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid--split      { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
 .grid--split-rev  { grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr); }
+
+/* ---------- dialogs ---------- */
+.modal__backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(15, 23, 42, .55); backdrop-filter: blur(3px);
+  display: grid; place-items: center; padding: 20px;
+  animation: fade-in .18s ease both;
+}
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lift);
+  width: min(560px, 100%); max-height: min(86dvh, 760px);
+  display: flex; flex-direction: column;
+  animation: modal-in .24s cubic-bezier(.22,.61,.36,1) both;
+}
+.modal__head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px; border-bottom: 1px solid var(--border-soft);
+}
+.modal__head h3 { flex: 1; min-width: 0; }
+.modal__body { padding: 18px; overflow-y: auto; flex: 1; }
+.modal__foot {
+  display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;
+  padding: 14px 18px; border-top: 1px solid var(--border-soft);
+}
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes modal-in {
+  from { opacity: 0; transform: translate3d(0, 16px, 0) scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+@media (max-width: 560px) {
+  .modal__backdrop { padding: 0; place-items: end stretch; }
+  .modal { width: 100%; max-height: 92dvh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .modal__foot .btn { flex: 1 1 auto; }
+}
+
+/* Destructive actions are never the same colour as the ones you want people to
+   take, and never the default focus target in a dialog. */
+.btn--danger { background: var(--red-500); color: #fff; }
+.btn--danger:hover { filter: brightness(1.06); }
 
 /* action · description · timestamp */
 .auditrow {
@@ -410,6 +532,10 @@ input:focus-visible {
   }
   .sidebar__logo { height: 34px; }
   .sidebar__brand-sub, .sidebar__group, .sidebar__footer-text { display: none; }
+  /* The rail is one scrolling strip of tabs on a phone, so the section wrappers
+     step out of the way and let their links be flex children of the nav. */
+  .sidebar__section { display: contents; }
+  .sidebar__brand-name { font-size: 11px; letter-spacing: .03em; }
   .sidebar__footer {
     flex: 0 0 auto; border-top: 0 !important; padding: 6px 12px !important;
   }

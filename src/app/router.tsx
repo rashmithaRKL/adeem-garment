@@ -10,6 +10,9 @@ import { AdminDashboardPage } from '@/features/dashboard/AdminDashboardPage';
 import { LinesPage } from '@/features/lines/LinesPage';
 import { OrdersPage } from '@/features/orders/OrdersPage';
 import { AnalyticsPage } from '@/features/analytics/AnalyticsPage';
+import { QualityManagementPage } from '@/features/quality/QualityManagementPage';
+import { HRPage } from '@/features/hr/HRPage';
+import { LoadingPlanPage } from '@/features/loading/LoadingPlanPage';
 import { UploadsPage } from '@/features/uploads/UploadsPage';
 import { UploadHistoryPage } from '@/features/uploads/UploadHistoryPage';
 import { UploadDetailPage } from '@/features/uploads/UploadDetailPage';
@@ -39,9 +42,13 @@ export const router = createBrowserRouter([
           children: [
             { index: true, element: <AdminDashboardPage /> },
             { path: 'dashboard', element: <AdminDashboardPage /> },
+            { path: 'quality', element: <QualityManagementPage /> },
             { path: 'lines', element: <LinesPage /> },
+            { path: 'hr', element: <HRPage /> },
+            { path: 'loading-plan', element: <LoadingPlanPage /> },
             { path: 'orders', element: <OrdersPage /> },
             { path: 'analytics', element: <AnalyticsPage /> },
+            { path: 'upload', element: <UploadExcelPage /> },
             { path: 'uploads', element: <UploadsPage /> },
             { path: 'uploads/:uploadId', element: <UploadDetailPage /> },
             { path: 'history', element: <UploadHistoryPage /> },

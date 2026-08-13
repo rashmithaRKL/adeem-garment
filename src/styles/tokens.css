@@ -20,6 +20,20 @@
   --orange-50:#fff7ed;--orange-500:#ea580c;
   --cyan-50:#ecfeff;  --cyan-500:#0891b2;
 
+  /* Chart series, in fixed slot order. These are deliberately NOT the semantic
+     colours above: a chart slices data by identity (a line, a defect category, a
+     school), and reusing the status hues would make "green" mean both "series 3"
+     and "healthy". Validated as an ordered set against the card surface — every
+     adjacent pair clears the colour-vision separation floor in both themes, so
+     the order is the safety mechanism and must not be shuffled. */
+  --chart-1:#2a78d6;  --chart-2:#eb6834;  --chart-3:#1baf7a;  --chart-4:#eda100;
+  --chart-5:#e87ba4;  --chart-6:#008300;  --chart-7:#4a3aa7;  --chart-8:#e34948;
+
+  /* One hue, light to dark, for a single ordered measure (ranked bars, heat).
+     Starts at a step that still holds 2:1 against white — anything lighter
+     dissolves into the card. */
+  --seq-1:#86b6ef; --seq-2:#5598e7; --seq-3:#2a78d6; --seq-4:#1c5cab; --seq-5:#104281;
+
   --page:#f4f6fa;
   --surface:#ffffff;
   --surface-muted:#f8fafc;
@@ -66,6 +80,13 @@
     --orange-500:#fb923c;
     --cyan-500:#22d3ee;
 
+    /* The same eight hues, re-stepped for a dark card rather than flipped: the
+       light values wash out to pastel here and stop being distinguishable. */
+    --chart-1:#3987e5;  --chart-2:#d95926;  --chart-3:#199e70;  --chart-4:#c98500;
+    --chart-5:#d55181;  --chart-6:#008300;  --chart-7:#9085e9;  --chart-8:#e66767;
+
+    --seq-1:#b7d3f6; --seq-2:#86b6ef; --seq-3:#5598e7; --seq-4:#2a78d6; --seq-5:#184f95;
+
     /* The 50s are tints on white and would glare here, so they become washes of
        their own hue at low alpha instead. */
     --blue-50:rgba(96,165,250,.15);
@@ -111,6 +132,11 @@
   --purple-500:#a78bfa;
   --orange-500:#fb923c;
   --cyan-500:#22d3ee;
+
+  --chart-1:#3987e5;  --chart-2:#d95926;  --chart-3:#199e70;  --chart-4:#c98500;
+  --chart-5:#d55181;  --chart-6:#008300;  --chart-7:#9085e9;  --chart-8:#e66767;
+
+  --seq-1:#b7d3f6; --seq-2:#86b6ef; --seq-3:#5598e7; --seq-4:#2a78d6; --seq-5:#184f95;
 
   --blue-50:rgba(96,165,250,.15);
   --green-50:rgba(74,222,128,.15);

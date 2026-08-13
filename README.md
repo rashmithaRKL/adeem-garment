@@ -26,10 +26,14 @@ Run the migrations in order against your Supabase project:
 
     supabase db push                  # or paste each file into the SQL editor
 
-    supabase/migrations/0001_schema.sql    tables, indexes, triggers
-    supabase/migrations/0002_rls.sql       row level security policies
-    supabase/migrations/0003_storage.sql   private bucket + storage policies
-    supabase/migrations/0004_seed.sql      5 production lines + demo orders
+    supabase/migrations/0001_schema.sql          tables, indexes, triggers
+    supabase/migrations/0002_rls.sql             row level security policies
+    supabase/migrations/0003_storage.sql         private bucket + storage policies
+    supabase/migrations/0004_seed.sql            5 production lines + demo orders
+    supabase/migrations/0005_status_realtime_audit.sql  status enums, realtime, audit log
+    supabase/migrations/0006_quality.sql         quality uploads, inspections, defects
+    supabase/migrations/0007_quality_lines.sql   register a line from an imported report
+    supabase/migrations/0008_hr_loading_plan.sql HR attendance + loading plan
 
 ## Edge Functions
 

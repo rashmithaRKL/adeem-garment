@@ -1,4 +1,4 @@
-import { AppShell, type NavItem } from './AppShell';
+import { AppShell, type NavItem, type NavSection } from './AppShell';
 import { useUnreadCount } from '@/features/notifications/queries';
 
 const titles = {
@@ -22,5 +22,7 @@ export function EmployeeLayout() {
     { to: '/employee/profile',       label: 'My Profile',        icon: '👤' }
   ];
 
-  return <AppShell group="Employee portal" items={items} titles={titles} />;
+  const sections: NavSection[] = [{ group: 'Employee portal', items }];
+
+  return <AppShell sections={sections} titles={titles} />;
 }

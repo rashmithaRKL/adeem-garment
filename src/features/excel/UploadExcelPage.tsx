@@ -6,6 +6,7 @@ import { MAX_UPLOAD_BYTES } from '@/lib/env';
 import type { MappableField } from '@/types/domain';
 import { useUploadFlow, SCAN_STAGES } from './useUploadFlow';
 import { STAGE_LABEL } from '@/features/quality/types';
+import { useAuth } from '@/features/auth/AuthProvider';
 
 const FIELD_LABELS: Record<MappableField, string> = {
   lineNumber: 'Production line', orderNumber: 'Order number', buyer: 'Buyer',
@@ -32,6 +33,10 @@ const STEP_ALIAS: Record<string, string> = {
 export function UploadExcelPage() {
   const { state, selectFile, setMapping, confirmMapping, runImport, runQualityImport, reset } = useUploadFlow();
   const inputRef = useRef<HTMLInputElement>(null);
+  // The same flow is mounted under /admin and /employee, so every link back into
+  // the app has to follow the caller rather than assume the employee portal.
+  const { profile } = useAuth();
+  const base = profile?.role === 'admin' ? '/admin' : '/employee';
   const currentIndex = STEPS.findIndex((s) => s.id === (STEP_ALIAS[state.step] ?? state.step));
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -135,7 +140,7 @@ export function UploadExcelPage() {
             <button type="button" className="btn btn--primary" onClick={() => void runImport(state.duplicate!.id)}>
               Create version {state.duplicate.upload_version + 1}
             </button>
-            <Link className="btn btn--secondary" to="/employee/history" style={{ textDecoration: 'none' }}>
+            <Link className="btn btn--secondary" to={base + '/history'} style={{ textDecoration: 'none' }}>
               View previous upload
             </Link>
             <button type="button" className="btn btn--ghost" onClick={reset}>Cancel</button>
@@ -344,7 +349,7 @@ export function UploadExcelPage() {
             {(state.qualityResult.processingMs / 1000).toFixed(1)} s.
           </p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <Link className="btn btn--primary" to="/employee/dashboard" style={{ textDecoration: 'none' }}>View dashboard</Link>
+            <Link className="btn btn--primary" to={base + '/dashboard'} style={{ textDecoration: 'none' }}>View dashboard</Link>
             <button type="button" className="btn btn--secondary" onClick={reset}>Upload another</button>
           </div>
         </Card>
@@ -387,8 +392,8 @@ export function UploadExcelPage() {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
-            <Link className="btn btn--primary" to="/employee/dashboard" style={{ textDecoration: 'none' }}>View dashboard</Link>
-            <Link className="btn btn--secondary" to="/employee/history" style={{ textDecoration: 'none' }}>Upload history</Link>
+            <Link className="btn btn--primary" to={base + '/dashboard'} style={{ textDecoration: 'none' }}>View dashboard</Link>
+            <Link className="btn btn--secondary" to={base + '/history'} style={{ textDecoration: 'none' }}>Upload history</Link>
             <button type="button" className="btn btn--secondary" onClick={reset}>Upload another</button>
           </div>
         </Card>

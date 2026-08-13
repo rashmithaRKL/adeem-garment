@@ -703,6 +703,126 @@ export interface Database {
           }
         ];
       };
+
+      hr_attendance: {
+        Row: {
+          id: string;
+          work_date: string;
+          department: string;
+          direct_carder: number;
+          indirect_carder: number;
+          present: number;
+          absent: number;
+          on_leave: number;
+          remarks: string | null;
+          recorded_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          work_date: string;
+          department?: string;
+          direct_carder?: number;
+          indirect_carder?: number;
+          present?: number;
+          absent?: number;
+          on_leave?: number;
+          remarks?: string | null;
+          recorded_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          work_date?: string;
+          department?: string;
+          direct_carder?: number;
+          indirect_carder?: number;
+          present?: number;
+          absent?: number;
+          on_leave?: number;
+          remarks?: string | null;
+          recorded_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'hr_attendance_recorded_by_fkey';
+            columns: ['recorded_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
+
+      loading_plan: {
+        Row: {
+          id: string;
+          line_no: number;
+          style_number: string;
+          order_number: string | null;
+          school_name: string | null;
+          order_qty: number;
+          pp_date: string | null;
+          pcd: string | null;
+          psd: string | null;
+          ped: string | null;
+          status: 'upcoming' | 'in_progress' | 'completed' | 'hold';
+          sequence: number;
+          remarks: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          line_no: number;
+          style_number: string;
+          order_number?: string | null;
+          school_name?: string | null;
+          order_qty?: number;
+          pp_date?: string | null;
+          pcd?: string | null;
+          psd?: string | null;
+          ped?: string | null;
+          status?: 'upcoming' | 'in_progress' | 'completed' | 'hold';
+          sequence?: number;
+          remarks?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          line_no?: number;
+          style_number?: string;
+          order_number?: string | null;
+          school_name?: string | null;
+          order_qty?: number;
+          pp_date?: string | null;
+          pcd?: string | null;
+          psd?: string | null;
+          ped?: string | null;
+          status?: 'upcoming' | 'in_progress' | 'completed' | 'hold';
+          sequence?: number;
+          remarks?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'loading_plan_created_by_fkey';
+            columns: ['created_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
     };
 
     Views: Record<never, never>;

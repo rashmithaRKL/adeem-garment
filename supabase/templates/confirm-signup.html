@@ -1,0 +1,153 @@
+<!--
+  Supabase → Authentication → Emails → "Confirm signup"
+  Paste the markup below into the Message body field.
+
+  {{ .ConfirmationURL }} and {{ .Email }} are substituted by Supabase. Leave them
+  exactly as written — the double braces are Go template syntax, not a placeholder
+  to fill in by hand.
+
+  Written for email clients, not browsers: layout is tables, every style is inline,
+  and there is no flexbox, grid or external stylesheet. Outlook renders through Word
+  and would silently drop all three.
+-->
+<!doctype html>
+<html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>Confirm your email</title>
+<!--[if mso]>
+<noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+<![endif]-->
+<style>
+  /* Only clients that support <style> get these; everything essential is inline. */
+  @media only screen and (max-width:600px) {
+    .sm-full { width:100% !important; }
+    .sm-pad { padding-left:22px !important; padding-right:22px !important; }
+    .sm-h1 { font-size:24px !important; }
+    .sm-code { font-size:15px !important; }
+  }
+  a { text-decoration:none; }
+</style>
+</head>
+
+<body style="margin:0; padding:0; background-color:#eef1f6; -webkit-font-smoothing:antialiased;">
+
+  <!-- Preview line: what the inbox shows beside the subject. Hidden in the body,
+       then padded so the client does not pull the footer text in after it. -->
+  <div style="display:none; font-size:1px; color:#eef1f6; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">
+    Confirm your email address to activate your Adeem Uniform account.
+    &#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;
+  </div>
+
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#eef1f6;">
+    <tr>
+      <td align="center" style="padding:32px 12px;">
+
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" class="sm-full"
+               style="width:600px; max-width:600px; background-color:#ffffff; border-radius:14px; overflow:hidden; box-shadow:0 2px 10px rgba(20,26,54,0.06);">
+
+          <!-- Brand -->
+          <tr>
+            <td align="center" class="sm-pad" style="padding:34px 40px 22px; border-bottom:1px solid #eceff4;">
+              <img src="https://adeemuniform.com/wp-content/uploads/2012/06/stark_logo.png"
+                   width="150" alt="Adeem Uniform"
+                   style="display:block; width:150px; max-width:60%; height:auto; border:0;">
+              <div style="margin-top:12px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase; color:#8b95a8;">
+                Production Management
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td class="sm-pad" style="padding:34px 44px 8px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+              <h1 class="sm-h1" style="margin:0 0 14px; font-size:27px; line-height:1.25; color:#20263c; font-weight:700;">
+                Confirm your email address
+              </h1>
+              <p style="margin:0 0 16px; font-size:15px; line-height:1.65; color:#4a5568;">
+                An account has been created for <strong style="color:#20263c;">{{ .Email }}</strong>
+                on the Adeem Uniform production system.
+              </p>
+              <p style="margin:0 0 26px; font-size:15px; line-height:1.65; color:#4a5568;">
+                Confirm this address to activate the account. Until you do, the password
+                you were given will not work.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Button. Bulletproof: VML for Outlook, a real anchor everywhere else. -->
+          <tr>
+            <td align="center" class="sm-pad" style="padding:0 44px 28px;">
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
+                           href="{{ .ConfirmationURL }}" style="height:50px;v-text-anchor:middle;width:280px;"
+                           arcsize="20%" stroke="f" fillcolor="#e0447f">
+                <w:anchorlock/>
+                <center style="color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:bold;">
+                  Confirm my email
+                </center>
+              </v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-- -->
+              <a href="{{ .ConfirmationURL }}"
+                 style="display:inline-block; background-color:#e0447f; color:#ffffff; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:16px; font-weight:700; line-height:50px; text-align:center; width:280px; max-width:100%; border-radius:10px;">
+                Confirm my email
+              </a>
+              <!--<![endif]-->
+            </td>
+          </tr>
+
+          <!-- Fallback link. Some clients strip buttons, and some people simply do
+               not trust one — the raw URL has to be present and selectable. -->
+          <tr>
+            <td class="sm-pad" style="padding:0 44px 30px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+              <p style="margin:0 0 8px; font-size:13px; color:#8b95a8;">
+                If the button does not work, copy this link into your browser:
+              </p>
+              <p class="sm-code" style="margin:0; font-size:13px; line-height:1.55; word-break:break-all;">
+                <a href="{{ .ConfirmationURL }}" style="color:#3f4a7e; text-decoration:underline;">{{ .ConfirmationURL }}</a>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Security note -->
+          <tr>
+            <td class="sm-pad" style="padding:0 44px 34px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"
+                     style="background-color:#f7f8fb; border-radius:10px;">
+                <tr>
+                  <td style="padding:16px 18px; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; font-size:13px; line-height:1.6; color:#5a6478;">
+                    This link can be used once and expires in 24 hours.
+                    <br>
+                    If you were not expecting this email, ignore it — the account stays
+                    inactive and nobody can sign in to it.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" class="sm-pad" style="padding:22px 44px 30px; border-top:1px solid #eceff4; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+              <p style="margin:0 0 4px; font-size:12px; color:#8b95a8;">
+                Adeem Uniform (Pvt) Ltd &middot; Production Management System
+              </p>
+              <p style="margin:0; font-size:12px; color:#aab3c2;">
+                This is an automated message. Replies are not monitored.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>

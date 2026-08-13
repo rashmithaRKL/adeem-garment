@@ -14,9 +14,15 @@ export interface NavItem {
   badge?: number;
 }
 
-interface AppShellProps {
+/** A titled block of links. The rail is grouped so the six screens the factory
+ *  is run from are not buried among the import and administration tools. */
+export interface NavSection {
   group: string;
   items: NavItem[];
+}
+
+interface AppShellProps {
+  sections: NavSection[];
   titles: Record<string, { title: string; sub: string }>;
 }
 
@@ -41,10 +47,10 @@ function ThemeToggle({ where }: { where: 'bar' | 'rail' }) {
   );
 }
 
-export function AppShell({ group, items, titles }: AppShellProps) {
+export function AppShell({ sections, titles }: AppShellProps) {
   const { profile, signOut } = useAuth();
   const { pathname } = useLocation();
-  const meta = titles[pathname] ?? { title: 'Adeem Garment', sub: '' };
+  const meta = titles[pathname] ?? { title: 'Adeem Uniform (Pvt) Ltd', sub: '' };
   const initials = (profile?.fullName ?? '')
     .split(' ').map((p) => p[0]).join('').slice(0, 2);
 
@@ -52,26 +58,32 @@ export function AppShell({ group, items, titles }: AppShellProps) {
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar__brand">
-          {/* The logo already reads "ADEEM UNIFORM", so repeating it in text beside
-              the mark would say the same thing twice. Only the system name follows. */}
+          {/* The mark carries the wordmark, but the registered company name and
+              what this system is are printed underneath it: the rail is the one
+              place on screen that says which company's factory this is. */}
           <img src={logoUrl} alt="Adeem Uniform" className="sidebar__logo" />
-          <span className="sidebar__brand-sub">Production Management</span>
+          <span className="sidebar__brand-name">Adeem Uniform (Pvt) Ltd</span>
+          <span className="sidebar__brand-sub">Management System</span>
         </div>
 
-        <nav className="sidebar__nav" aria-label={group}>
-          <p className="sidebar__group">{group}</p>
-          {items.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) => 'navlink' + (isActive ? ' navlink--active' : '')}
-            >
-              {/* Decorative: the label beside it names the destination, so a screen
-                  reader announcing "house emoji Dashboard" would only add noise. */}
-              <span className="navlink__icon" aria-hidden>{item.icon}</span>
-              <span>{item.label}</span>
-              {item.badge ? <span className="navlink__badge">{item.badge}</span> : null}
-            </NavLink>
+        <nav className="sidebar__nav" aria-label="Main">
+          {sections.map((section) => (
+            <div key={section.group} className="sidebar__section">
+              <p className="sidebar__group">{section.group}</p>
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => 'navlink' + (isActive ? ' navlink--active' : '')}
+                >
+                  {/* Decorative: the label beside it names the destination, so a screen
+                      reader announcing "house emoji Dashboard" would only add noise. */}
+                  <span className="navlink__icon" aria-hidden>{item.icon}</span>
+                  <span>{item.label}</span>
+                  {item.badge ? <span className="navlink__badge">{item.badge}</span> : null}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 
