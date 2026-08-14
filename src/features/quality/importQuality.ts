@@ -30,9 +30,15 @@ const chunks = <T,>(rows: T[]): T[][] => {
  */
 async function registerLines(parsed: QualityParseResult): Promise<void> {
   const seen = new Map<number, string>();
+  // linesSeen also carries the lines whose row or sheet the workbook left blank,
+  // so a line that has not been inspected yet still gets registered and shows up
+  // on the Quality screens as "not inspected" rather than not existing.
+  for (const lineNo of parsed.linesSeen) {
+    if (lineNo > 0) seen.set(lineNo, `LINE ${String(lineNo).padStart(2, '0')}`);
+  }
   for (const row of [...parsed.inspections, ...parsed.defects]) {
     if (row.isFactory || row.lineNo == null || row.lineNo <= 0) continue;
-    if (!seen.has(row.lineNo)) seen.set(row.lineNo, row.lineLabel ?? '');
+    if (row.lineLabel) seen.set(row.lineNo, row.lineLabel);
   }
 
   for (const [lineNo, label] of seen) {

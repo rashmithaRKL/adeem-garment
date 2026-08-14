@@ -38,6 +38,13 @@ export interface QualityParseResult {
   sheetsSkipped: { sheet: string; reason: string }[];
   inspections: InspectionRow[];
   defects: DefectRow[];
+  /**
+   * Every line the workbook names, including the ones whose row or sheet is still
+   * blank. A line the factory has opened but not yet inspected has no inspection
+   * row to be inferred from, and leaving it unregistered is what kept LINE 04 off
+   * the Quality screens entirely.
+   */
+  linesSeen: number[];
   periodStart: string | null;
   periodEnd: string | null;
   warnings: string[];

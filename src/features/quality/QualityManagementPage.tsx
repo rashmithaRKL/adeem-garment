@@ -8,12 +8,20 @@ import { formatNumber, formatDate } from '@/lib/format';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
 import {
   fetchQualityRecords, buildQualityMatrix,
-  type QualityBasis, type FinalStatus, type LineQualityRow
+  type QualityBasis, type FinalStatus, type LineQualityRow, type QualityMatrix
 } from './queries';
 import { STAGE_LABEL, type QualityStage } from './types';
 
-/** The four gates the client asked to see line by line, in floor order. */
-const COLUMNS: QualityStage[] = ['in_line', 'end_line', 'appearance', 'aql'];
+/**
+ * The gates the client asked to see line by line, in floor order. Pre final sits
+ * here rather than beside Final: the KPI sheets record it per line every day, and
+ * leaving it out threw away the one gate closest to shipping that the lines
+ * actually measure. Final itself is the verdict column at the end of the row.
+ */
+const COLUMNS: QualityStage[] = ['in_line', 'end_line', 'appearance', 'pre_final', 'aql'];
+
+/** The chart shows Final as well — a line that records it should be able to see it. */
+const CHART_STAGES: QualityStage[] = [...COLUMNS, 'final'];
 
 const FINAL_LABEL: Record<FinalStatus, string> = {
   passed: 'Passed',
@@ -49,13 +57,13 @@ export function QualityManagementPage() {
   const [period, setPeriod] = useState<string | null>(null);
 
   const records = useQuery({ queryKey: ['quality', 'records'], queryFn: fetchQualityRecords });
-  const data = records.data ?? { inspections: [], defects: [] };
+  const data = records.data ?? { inspections: [], defects: [], lines: [], finals: [] };
 
   // The period picker is per basis, so switching basis drops a selection that
   // no longer names anything — the builder falls back to every period.
   const matrix = buildQualityMatrix(data, basis, period, EFFICIENCY_THRESHOLD);
 
-  const stageSeries = COLUMNS.map((stage, i) => ({
+  const stageSeries = CHART_STAGES.map((stage, i) => ({
     key: stage, label: STAGE_LABEL[stage], color: seriesColor(i)
   }));
 
@@ -135,14 +143,14 @@ export function QualityManagementPage() {
 
         <Card title="Pass rate by line and stage" style={{ marginTop: 16 }}
           aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-            in line · end line · appearance · AQL
+            {CHART_STAGES.map((s) => STAGE_LABEL[s]).join(' · ')}
           </span>}>
           <BarChart
             height={250}
             format={(n) => n.toFixed(1) + '%'}
             data={matrix.lines.map((line) => ({
               label: line.label.replace(/^line\s*/i, 'L'),
-              values: COLUMNS.reduce<Record<string, number>>((acc, stage) => {
+              values: CHART_STAGES.reduce<Record<string, number>>((acc, stage) => {
                 const cell = line.stages[stage];
                 if (cell?.passPct != null) acc[stage] = cell.passPct;
                 return acc;
@@ -152,8 +160,9 @@ export function QualityManagementPage() {
             empty="No stage figures in this period."
           />
           <p style={{ margin: '12px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
-            A missing bar means that line was not inspected at that stage in this period — it
-            is not a zero pass rate.
+            Every line the factory runs is shown. A missing bar means that line was not
+            inspected at that stage in this period — it is not a zero pass rate — and a line
+            with no bars at all was not inspected in this period.
           </p>
         </Card>
 
@@ -196,12 +205,16 @@ export function QualityManagementPage() {
           <TrendPanel basis={basis} data={data} />
         </Card>
 
+        <FinalInspectionCard
+          summary={matrix.finalInspection}
+          month={basis === 'monthly' ? matrix.period : null} />
+
         <Card title="Line by line" style={{ marginTop: 16 }}
           aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
             {matrix.period ? periodLabel(matrix.period, basis) : 'all periods'}
           </span>}>
           <div className="table-scroll">
-            <table className="table" style={{ minWidth: 860 }}>
+            <table className="table" style={{ minWidth: 960 }}>
               <thead>
                 <tr>
                   <th>Line</th>
@@ -220,11 +233,121 @@ export function QualityManagementPage() {
           <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
             Rejection is defects found for every hundred pieces checked. Final inspection is
             the pass rate of the final gate on its own, so a line can clear every earlier stage
-            and still read below target here.
+            and still read below target here. A line reads “Not inspected” when the reports
+            imported for this period record no final gate for it — the pre-shipment audit above
+            is filed for the factory as a whole and is not attributed to a line.
           </p>
         </Card>
       </QueryState>
     </>
+  );
+}
+
+const monthLabel = (month: string): string =>
+  new Date(month).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+/** One figure in a strip: the number, what it measures, and its qualifier. */
+function Figure({ label, value, sub, color }: {
+  label: string; value: string; sub: string; color?: string;
+}) {
+  return (
+    <div>
+      <div style={{ font: '600 26px/1 var(--font-heading)', color: color ?? 'var(--text)' }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 7 }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 3 }}>{sub}</div>
+    </div>
+  );
+}
+
+/**
+ * The pre-shipment final inspection — the gate the buyer sees, filed per month
+ * for the factory rather than per line. It was being imported and then dropped:
+ * every quality query excludes the sheets' Factory roll-up rows, and final
+ * inspection is the one stage that is only ever filed that way, so the report
+ * had nowhere on the screen to land.
+ */
+function FinalInspectionCard({ summary, month }: {
+  summary: QualityMatrix['finalInspection'];
+  /** The month the picker is on, or null for every month at once. */
+  month: string | null;
+}) {
+  return (
+    <Card title="Final inspection" style={{ marginTop: 16 }}
+      aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+        pre-shipment audit, factory-wide
+      </span>}>
+      {!summary.hasData ? (
+        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+          {month
+            ? `No final inspection was filed for ${monthLabel(month)}. Pick another month, or `
+              + 'switch to all months, to see the ones that were.'
+            : 'No final inspection figures have been imported yet. They come from the monthly '
+              + 'inspection report — the workbook with the Summary sheet listing qty shipped, '
+              + 'sample inspected, defects and the first-time pass rate — uploaded from the '
+              + 'Upload Excel screen.'}
+        </p>
+      ) : (
+        <>
+          {/* A flat strip rather than KPI tiles: those render as cards of their
+              own, and a card inside a card reads as a nesting that means nothing. */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px 40px' }}>
+            <Figure
+              label="First-time pass rate"
+              value={pctText(summary.latest?.passPct ?? null)}
+              sub={summary.latest ? monthLabel(summary.latest.month) : 'no month with figures'}
+              color={summary.latest?.passPct != null && summary.latest.passPct < EFFICIENCY_THRESHOLD
+                ? 'var(--red-500)'
+                : 'var(--green-500)'} />
+            <Figure
+              label="Sample inspected"
+              value={formatNumber(summary.checked)}
+              sub={summary.months.length + (summary.months.length === 1 ? ' month' : ' months')} />
+            <Figure
+              label="Audit defects"
+              value={formatNumber(summary.defects)}
+              sub={summary.defectPct == null
+                ? 'nothing sampled yet'
+                : pctText(summary.defectPct) + ' of the sample'} />
+          </div>
+
+          <div className="table-scroll" style={{ marginTop: 14 }}>
+            <table className="table" style={{ minWidth: 460 }}>
+              <thead>
+                <tr>
+                  <th>Month</th>
+                  <th className="num">Sample inspected</th>
+                  <th className="num">Defects</th>
+                  <th className="num">First-time pass</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.months.map((m) => (
+                  <tr key={m.month}>
+                    <td>{monthLabel(m.month)}</td>
+                    <td className="num">{formatNumber(m.checked)}</td>
+                    <td className="num">{formatNumber(m.defects)}</td>
+                    <td className="num" style={{
+                      fontWeight: 600,
+                      color: m.passPct == null
+                        ? 'var(--text-faint)'
+                        : m.passPct >= EFFICIENCY_THRESHOLD ? 'var(--text)' : 'var(--red-500)'
+                    }}>
+                      {pctText(m.passPct)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+            The first-time pass rate counts styles that cleared the audit at the first
+            attempt, while sample inspected and defects count pieces. The two are shown side
+            by side rather than reconciled, because the report measures them that way.
+          </p>
+        </>
+      )}
+    </Card>
   );
 }
 

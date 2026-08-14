@@ -118,6 +118,8 @@ export function QualitySection() {
 
       <div className="grid grid--split-rev" style={{ marginTop: 16 }}>
         <Card title="Pass rate by line">
+          {/* Every line the factory runs, not only the ones with figures: a line
+              that was never inspected reads "—" rather than disappearing. */}
           <RankedBars
             max={100}
             rows={d.lines.map((l) => ({
@@ -125,7 +127,9 @@ export function QualitySection() {
               value: l.passPct ?? 0,
               suffix: pctText(l.passPct),
               color: low(l.passPct) ? MARK_LOW : MARK,
-              hint: `${formatNumber(l.checked)} checked · ${formatNumber(l.defects)} defects`
+              hint: l.passPct == null
+                ? 'not inspected in the reports imported so far'
+                : `${formatNumber(l.checked)} checked · ${formatNumber(l.defects)} defects`
             }))}
           />
         </Card>

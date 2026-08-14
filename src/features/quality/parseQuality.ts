@@ -217,6 +217,7 @@ function parseLineKpi(wb: XLSX.WorkBook, fileName: string): QualityParseResult {
   const used: string[] = [];
   const skipped: { sheet: string; reason: string }[] = [];
   const warnings: string[] = [];
+  const linesSeen = new Set<number>();
 
   for (const name of wb.SheetNames) {
     const lineMatch = /^line\s*0*(\d+)$/i.exec(name.trim());
@@ -224,6 +225,10 @@ function parseLineKpi(wb: XLSX.WorkBook, fileName: string): QualityParseResult {
       skipped.push({ sheet: name, reason: 'not a per-line sheet' });
       continue;
     }
+    // A sheet named for a line is proof the line exists, even when every row on
+    // it is still blank -- a new line gets its tab before its first inspection.
+    linesSeen.add(Number(lineMatch[1]));
+
     const grid = readGrid(wb.Sheets[name]!);
     if (grid.length < 3) { skipped.push({ sheet: name, reason: 'empty' }); continue; }
 
@@ -259,7 +264,7 @@ function parseLineKpi(wb: XLSX.WorkBook, fileName: string): QualityParseResult {
   }
 
   if (!used.length) warnings.push('No per-line sheet contained dated inspection rows.');
-  return finish('line_kpi', inspections, [], used, skipped, warnings, fileName);
+  return finish('line_kpi', inspections, [], used, skipped, warnings, fileName, linesSeen);
 }
 
 // ---------------------------------------------------------------------------
@@ -317,10 +322,13 @@ function parseDailyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseRes
   const styleCol = findCol(sub, 0, sub.length - 1, [/^styleno$/, /^style$/]);
 
   const inspections: InspectionRow[] = [];
+  const linesSeen = new Set<number>();
   for (let r = bandRow + 3; r < grid.length; r += 1) {
     const row = grid[r]!;
     const id = rowIdentity(row[teamCol >= 0 ? teamCol : 0]);
     if (!id) continue;
+    // A team with a row but no figures did not run that day; it is still a line.
+    if (!id.isFactory && id.lineNo != null) linesSeen.add(id.lineNo);
 
     let wrote = false;
     for (const c of cols) {
@@ -344,7 +352,7 @@ function parseDailyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseRes
   const defects = dailyDefects(grid, bandRow, date);
   return finish('daily_quality', inspections, defects, [name],
     wb.SheetNames.slice(1).map((s) => ({ sheet: s, reason: 'not the report sheet' })),
-    warnings, fileName);
+    warnings, fileName, linesSeen);
 }
 
 /**
@@ -433,6 +441,7 @@ function parseMonthlyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseR
   const skipped: { sheet: string; reason: string }[] = [];
   const warnings: string[] = [];
   const year = yearFromName(fileName);
+  const linesSeen = new Set<number>();
 
   for (const name of wb.SheetNames) {
     const grid = readGrid(wb.Sheets[name]!);
@@ -459,6 +468,7 @@ function parseMonthlyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseR
       const row = grid[r]!;
       const id = rowIdentity(row[teamCol >= 0 ? teamCol : 0]);
       if (!id) continue;
+      if (!id.isFactory && id.lineNo != null) linesSeen.add(id.lineNo);
       let any = false;
       for (const c of cols) {
         const v = stageValues(row, c);
@@ -476,7 +486,7 @@ function parseMonthlyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseR
   }
 
   if (!used.length) warnings.push('No sheet in this workbook contained monthly quality figures.');
-  return finish('monthly_quality', inspections, [], used, skipped, warnings, fileName);
+  return finish('monthly_quality', inspections, [], used, skipped, warnings, fileName, linesSeen);
 }
 
 // ---------------------------------------------------------------------------
@@ -664,11 +674,18 @@ function finish(
   sheetsUsed: string[],
   sheetsSkipped: { sheet: string; reason: string }[],
   warnings: string[],
-  _fileName: string
+  _fileName: string,
+  linesSeen: Set<number> = new Set()
 ): QualityParseResult {
   const days = inspections.map((i) => i.inspectionDate).filter(Boolean) as string[];
   const months = [...inspections, ...defects].map((i) => i.periodMonth).filter(Boolean) as string[];
   const all = [...days, ...months].sort();
+
+  // A line that did produce figures is named by its own rows, so the two sources
+  // are merged rather than the blank-row scan being trusted on its own.
+  for (const row of [...inspections, ...defects]) {
+    if (!row.isFactory && row.lineNo != null && row.lineNo > 0) linesSeen.add(row.lineNo);
+  }
 
   return {
     kind,
@@ -677,6 +694,7 @@ function finish(
     sheetsSkipped,
     inspections,
     defects,
+    linesSeen: [...linesSeen].sort((a, b) => a - b),
     periodStart: all[0] ?? null,
     periodEnd: all[all.length - 1] ?? null,
     warnings
