@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { Kpi } from '@/components/Kpi';
@@ -9,6 +10,7 @@ import { Donut, BarChart, LineChart, RankedBars } from '@/components/charts';
 import { formatNumber, formatPercent, formatDate } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { downloadHrTemplate } from '@/features/excel/templates';
 import { fetchHrRows, buildHrOverview, type HrRow } from './queries';
 import {
   createHrEntry, updateHrEntry, deleteHrEntry, HR_DEPARTMENTS, type HrEdit
@@ -69,6 +71,14 @@ export function HRPage() {
               placeholder="Search by date, department or note"
               count={{ shown: shown.length, total: all.length }} />
           </div>
+          <button type="button" className="btn btn--secondary" style={{ flex: 'none' }}
+            onClick={() => void downloadHrTemplate()}
+            title="A blank attendance workbook laid out the way the importer expects">
+            Excel template
+          </button>
+          <Link to="/admin/upload" className="btn btn--secondary" style={{ flex: 'none', textDecoration: 'none' }}>
+            Upload sheet
+          </Link>
           <button type="button" className="btn btn--primary" style={{ flex: 'none' }}
             onClick={() => setEditing({ row: null })}>
             + Add day
@@ -84,7 +94,7 @@ export function HRPage() {
         isEmpty={all.length === 0}
         emptyTitle="No attendance recorded yet"
         emptyBody={isAdmin
-          ? 'Use “Add day” above to enter a day’s direct and indirect carder and how many were absent. Everything on this screen is derived from those entries.'
+          ? 'Two ways in: upload an attendance workbook on the Upload Excel screen — any sheet with date, carder, present and absent columns is recognised — or use “Add day” to type one in. Everything on this screen is derived from those entries.'
           : 'Manpower figures appear once an administrator records a day.'}
       >
         <div className="grid grid--kpi">

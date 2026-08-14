@@ -34,6 +34,23 @@ Run the migrations in order against your Supabase project:
     supabase/migrations/0006_quality.sql         quality uploads, inspections, defects
     supabase/migrations/0007_quality_lines.sql   register a line from an imported report
     supabase/migrations/0008_hr_loading_plan.sql HR attendance + loading plan
+    supabase/migrations/0009_loading_plan_unique.sql  one style per line, so plans re-import
+
+## What the Upload Excel screen recognises
+
+The kind of workbook is detected from its headers and sheet names — no template is imposed, and
+the file is only claimed by a parser that is sure of it:
+
+| Workbook | Recognised by | Written to |
+| --- | --- | --- |
+| HR attendance | a date column beside direct/indirect carder, present or absent | `hr_attendance`, upserted on (date, department) |
+| Loading plan | a style column beside PP date, PCD, PSD or PED | `loading_plan`, upserted on (line, style) |
+| Quality report | KPI per-line sheets, or a "daily/monthly quality" title | `quality_*`, refuses a duplicate file |
+| Production sheet | line, order, target and produced columns | `production_records`, versioned per upload |
+
+The HR and Loading Plan screens each offer a "Excel template" download — a blank workbook in a
+layout known to import, for teams starting from scratch. HR and loading-plan imports are
+admin-only, matching the write policies on those two tables.
 
 ## Edge Functions
 

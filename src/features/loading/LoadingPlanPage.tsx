@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { Kpi } from '@/components/Kpi';
@@ -9,6 +10,7 @@ import { Donut, BarChart, RankedBars, toSlices } from '@/components/charts';
 import { formatNumber, formatDate } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { downloadPlanTemplate } from '@/features/excel/templates';
 import {
   fetchLoadingPlan, overdueMilestone, PLAN_STATUSES, PLAN_STATUS_LABEL,
   type PlanRow, type PlanStatus
@@ -109,6 +111,14 @@ export function LoadingPlanPage() {
               placeholder="Search line, style, order, school or status"
               count={{ shown: shown.length, total: rows.length }} />
           </div>
+          <button type="button" className="btn btn--secondary" style={{ flex: 'none' }}
+            onClick={() => void downloadPlanTemplate()}
+            title="A blank loading plan laid out the way the importer expects">
+            Excel template
+          </button>
+          <Link to="/admin/upload" className="btn btn--secondary" style={{ flex: 'none', textDecoration: 'none' }}>
+            Upload sheet
+          </Link>
           <button type="button" className="btn btn--primary" style={{ flex: 'none' }}
             onClick={() => setEditing({ row: null })}>
             + Add style
@@ -124,7 +134,7 @@ export function LoadingPlanPage() {
         isEmpty={rows.length === 0}
         emptyTitle="No loading plan entered yet"
         emptyBody={isAdmin
-          ? 'Use “Add style” above to queue a style against a line, with its order number, school, quantity and the PP, PCD, PSD and PED dates. The Production Line screen reads the next style from here.'
+          ? 'Two ways in: upload a loading plan on the Upload Excel screen — any sheet with style, line and PP/PCD/PSD/PED columns is recognised — or use “Add style” to queue one by hand. The Production Line screen reads the next style from here.'
           : 'Upcoming styles appear once a planner enters them.'}
       >
         <div className="grid grid--kpi">

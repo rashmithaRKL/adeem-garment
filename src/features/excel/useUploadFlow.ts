@@ -10,11 +10,17 @@ import { useAuth } from '@/features/auth/AuthProvider';
 import { tryParseQualityFile } from '@/features/quality/parseQuality';
 import { importQuality, type QualityImportResult } from '@/features/quality/importQuality';
 import type { QualityParseResult } from '@/features/quality/types';
+import { tryParseHrFile, type HrParseResult } from '@/features/hr/parseHr';
+import { importHrRows, type SheetImportResult } from '@/features/hr/importHr';
+import { tryParsePlanFile, type PlanParseResult } from '@/features/loading/parsePlan';
+import { importPlanRows } from '@/features/loading/importPlan';
 
 export type FlowStep =
   | 'select' | 'scanning' | 'duplicate' | 'mapping' | 'preview' | 'importing' | 'done'
   // the quality reports take their own preview screen: they have no columns to map
-  | 'quality' | 'qualityDuplicate' | 'qualityDone';
+  | 'quality' | 'qualityDuplicate' | 'qualityDone'
+  // and so do the two sheets that are upserted rather than versioned
+  | 'sheet' | 'sheetDone';
 
 export interface ScanStage { label: string; detail: string; }
 
@@ -42,13 +48,17 @@ interface FlowState {
   quality: QualityParseResult | null;
   qualityResult: QualityImportResult | null;
   qualityDuplicate: { id: string; original_filename: string; created_at: string } | null;
+  /** An HR attendance sheet or a loading plan, whichever was recognised. */
+  sheet: HrParseResult | PlanParseResult | null;
+  sheetResult: SheetImportResult | null;
   error: string;
 }
 
 const INITIAL: FlowState = {
   step: 'select', file: null, fileHash: '', parsed: null, scan: null, mappings: [],
   stageIndex: 0, importPercent: 0, result: null, duplicate: null,
-  quality: null, qualityResult: null, qualityDuplicate: null, error: ''
+  quality: null, qualityResult: null, qualityDuplicate: null,
+  sheet: null, sheetResult: null, error: ''
 };
 
 export function useUploadFlow() {
@@ -68,9 +78,28 @@ export function useUploadFlow() {
       const fileHash = await hashFile(file);
       setState((s) => ({ ...s, stageIndex: 2, fileHash }));
 
+      // Order matters, and it runs from the most specific test to the least.
+      //
+      // Attendance needs a date beside a carder or attendance column; a loading
+      // plan needs a style beside PP, PCD, PSD or PED. Nothing else in the
+      // factory's paperwork looks like either. The quality check comes after
+      // them because it recognises a report by its sheet names — and a loading
+      // plan with one tab per line ("LINE 01", "LINE 02") answers to that test
+      // as readily as a KPI report does.
+      const hr = await tryParseHrFile(file);
+      if (hr) {
+        setState((s) => ({ ...s, stageIndex: SCAN_STAGES.length, sheet: hr, step: 'sheet' }));
+        return;
+      }
+
+      const plan = await tryParsePlanFile(file);
+      if (plan) {
+        setState((s) => ({ ...s, stageIndex: SCAN_STAGES.length, sheet: plan, step: 'sheet' }));
+        return;
+      }
+
       // The quality reports carry no order number, target or produced quantity,
-      // so they can never satisfy the production importer. Recognise them first
-      // and send them down their own path rather than failing every row.
+      // so they can never satisfy the production importer either.
       const quality = await tryParseQualityFile(file);
       if (quality) {
         setState((s) => ({ ...s, stageIndex: SCAN_STAGES.length, quality, step: 'quality' }));
@@ -186,5 +215,40 @@ export function useUploadFlow() {
     }
   }, [state, profile, queryClient]);
 
-  return { state, selectFile, setMapping, confirmMapping, runImport, runQualityImport, reset };
+  /**
+   * HR and loading-plan sheets are upserted on their own natural key, so there is
+   * no duplicate screen and no version chain here: uploading a revised sheet is
+   * the supported way to correct one.
+   */
+  const runSheetImport = useCallback(async () => {
+    const { sheet } = state;
+    if (!sheet) return;
+
+    setState((s) => ({ ...s, step: 'importing', importPercent: 25, error: '' }));
+    const tick = setInterval(
+      () => setState((s) => ({ ...s, importPercent: Math.min(s.importPercent + 9, 92) })),
+      240
+    );
+
+    try {
+      const profileId = profile?.id ?? null;
+      const response = sheet.kind === 'hr'
+        ? await importHrRows(sheet.rows, profileId)
+        : await importPlanRows(sheet.rows, profileId);
+
+      await queryClient.invalidateQueries({ queryKey: [sheet.kind === 'hr' ? 'hr' : 'loadingPlan'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      await queryClient.invalidateQueries({ queryKey: ['lines'] });
+      setState((s) => ({ ...s, step: 'sheetDone', importPercent: 100, sheetResult: response }));
+    } catch (err) {
+      setState((s) => ({ ...s, step: 'sheet', error: friendlyError(err) }));
+    } finally {
+      clearInterval(tick);
+    }
+  }, [state, profile, queryClient]);
+
+  return {
+    state, selectFile, setMapping, confirmMapping,
+    runImport, runQualityImport, runSheetImport, reset
+  };
 }

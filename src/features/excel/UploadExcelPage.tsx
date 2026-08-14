@@ -27,16 +27,21 @@ const STEPS: { id: string; label: string }[] = [
  */
 const STEP_ALIAS: Record<string, string> = {
   duplicate: 'preview', importing: 'preview',
-  quality: 'preview', qualityDuplicate: 'preview', qualityDone: 'done'
+  quality: 'preview', qualityDuplicate: 'preview', qualityDone: 'done',
+  sheet: 'preview', sheetDone: 'done'
 };
 
 export function UploadExcelPage() {
-  const { state, selectFile, setMapping, confirmMapping, runImport, runQualityImport, reset } = useUploadFlow();
+  const {
+    state, selectFile, setMapping, confirmMapping,
+    runImport, runQualityImport, runSheetImport, reset
+  } = useUploadFlow();
   const inputRef = useRef<HTMLInputElement>(null);
   // The same flow is mounted under /admin and /employee, so every link back into
   // the app has to follow the caller rather than assume the employee portal.
   const { profile } = useAuth();
-  const base = profile?.role === 'admin' ? '/admin' : '/employee';
+  const isAdmin = profile?.role === 'admin';
+  const base = isAdmin ? '/admin' : '/employee';
   const currentIndex = STEPS.findIndex((s) => s.id === (STEP_ALIAS[state.step] ?? state.step));
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -83,10 +88,12 @@ export function UploadExcelPage() {
             }}
           >
             <p style={{ font: '600 20px var(--font-heading)', letterSpacing: '.04em', margin: '0 0 6px' }}>
-              Drop your production Excel here
+              Drop your Excel here
             </p>
             <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: 0 }}>
-              .xlsx or .xls · max {formatBytes(MAX_UPLOAD_BYTES)} · scanned and validated before anything is imported
+              Production, quality, HR attendance or loading plan — the kind is recognised from the
+              headers. .xlsx or .xls · max {formatBytes(MAX_UPLOAD_BYTES)} · scanned and validated
+              before anything is imported
             </p>
             <span className="btn btn--primary" style={{ display: 'inline-block', marginTop: 18 }}>Select file</span>
             <input ref={inputRef} type="file" accept=".xlsx,.xls" hidden
@@ -318,6 +325,149 @@ export function UploadExcelPage() {
             </div>
           </Card>
         </>
+      )}
+
+      {state.step === 'sheet' && state.sheet && (
+        <>
+          <div className="banner" style={{
+            background: 'var(--blue-50)', border: '1px solid var(--info-border)', color: 'var(--text)',
+            marginBottom: 16, fontSize: 13.5
+          }}>
+            Recognised as a <strong>{state.sheet.label}</strong>. No column mapping is needed —
+            the headers were matched automatically. Rows are written on their own key
+            ({state.sheet.kind === 'hr' ? 'date and department' : 'line and style'}), so uploading a
+            corrected sheet updates those rows instead of adding a second copy.
+          </div>
+
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', marginBottom: 16 }}>
+            {([
+              ['Sheets read', state.sheet.sheetsUsed.length, 'var(--text-muted)'],
+              ['Rows ready', state.sheet.rows.length, 'var(--green-500)'],
+              ['Rows skipped', state.sheet.errors.length, 'var(--red-500)'],
+              ['Warnings', state.sheet.warnings.length, 'var(--amber-500)']
+            ] as [string, number, string][]).map(([label, n, color]) => (
+              <div className="card" key={label}>
+                <div style={{ font: '600 24px/1 var(--font-heading)', color }}>{formatNumber(n)}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          <Card title="Preview" aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+            nothing is written until you confirm
+          </span>}>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)' }}>
+              Covering {state.sheet.periodStart ?? '—'} to {state.sheet.periodEnd ?? '—'} ·
+              {' '}sheets used: {state.sheet.sheetsUsed.join(', ')}
+            </p>
+
+            <div className="table-scroll">
+              {state.sheet.kind === 'hr' ? (
+                <table className="table" style={{ minWidth: 720 }}>
+                  <thead>
+                    <tr>
+                      <th>Date</th><th>Department</th>
+                      <th className="num">Direct</th><th className="num">Indirect</th>
+                      <th className="num">Present</th><th className="num">Absent</th><th className="num">Leave</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.sheet.rows.slice(0, 10).map((r) => (
+                      <tr key={r.sheet + r.rowNumber}>
+                        <td>{r.work_date}</td>
+                        <td>{r.department}</td>
+                        <td className="num">{formatNumber(r.direct_carder)}</td>
+                        <td className="num">{formatNumber(r.indirect_carder)}</td>
+                        <td className="num">{formatNumber(r.present)}</td>
+                        <td className="num">{formatNumber(r.absent)}</td>
+                        <td className="num">{formatNumber(r.on_leave)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="table" style={{ minWidth: 860 }}>
+                  <thead>
+                    <tr>
+                      <th>Line</th><th>Style</th><th>Order</th><th>School</th>
+                      <th className="num">Qty</th><th>PP date</th><th>PCD</th><th>PSD</th><th>PED</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.sheet.rows.slice(0, 10).map((r) => (
+                      <tr key={r.sheet + r.rowNumber}>
+                        <td style={{ fontWeight: 600 }}>{String(r.line_no).padStart(2, '0')}</td>
+                        <td>{r.style_number}</td>
+                        <td className="mono">{r.order_number ?? '—'}</td>
+                        <td>{r.school_name ?? '—'}</td>
+                        <td className="num">{formatNumber(r.order_qty)}</td>
+                        <td>{r.pp_date ?? '—'}</td>
+                        <td>{r.pcd ?? '—'}</td>
+                        <td>{r.psd ?? '—'}</td>
+                        <td>{r.ped ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {state.sheet.rows.length > 10 && (
+              <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-faint)' }}>
+                Showing the first 10 of {formatNumber(state.sheet.rows.length)} rows.
+              </p>
+            )}
+
+            {state.sheet.warnings.map((w) => (
+              <p key={w} className="banner banner--warning" style={{ marginTop: 12, marginBottom: 0 }}>{w}</p>
+            ))}
+
+            {state.sheet.errors.length > 0 && (
+              <p className="banner banner--error" style={{ marginTop: 12, marginBottom: 0 }}>
+                {state.sheet.errors.length} row{state.sheet.errors.length > 1 ? 's' : ''} will be
+                skipped — the first is {state.sheet.errors[0]!.sheet} row {state.sheet.errors[0]!.rowNumber}:
+                {' '}{state.sheet.errors[0]!.message}
+              </p>
+            )}
+
+            {/* Both tables are admin-write under RLS, so the database would refuse
+                this import rather than the browser. Saying so before the attempt
+                beats a permission error after it. */}
+            {!isAdmin && (
+              <p className="banner banner--warning" style={{ marginTop: 12, marginBottom: 0 }}>
+                Only an administrator can import HR and loading-plan sheets. Send this file to
+                an administrator, or ask them to run the upload.
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn--success" onClick={() => void runSheetImport()}
+                disabled={state.sheet.rows.length === 0 || !isAdmin}>
+                Import &amp; update dashboard
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={reset}>Cancel</button>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {state.step === 'sheetDone' && state.sheetResult && state.sheet && (
+        <Card>
+          <h3 style={{ fontSize: 23, margin: '0 0 4px' }}>
+            {state.sheet.kind === 'hr' ? 'Attendance imported' : 'Loading plan imported'}
+          </h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: '0 0 20px' }}>
+            {formatNumber(state.sheetResult.written)} rows written in{' '}
+            {(state.sheetResult.processingMs / 1000).toFixed(1)} s.
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Link className="btn btn--primary" style={{ textDecoration: 'none' }}
+              to={base + (state.sheet.kind === 'hr' ? '/hr' : '/loading-plan')}>
+              {state.sheet.kind === 'hr' ? 'View HR' : 'View loading plan'}
+            </Link>
+            <button type="button" className="btn btn--secondary" onClick={reset}>Upload another</button>
+          </div>
+        </Card>
       )}
 
       {state.step === 'qualityDuplicate' && state.qualityDuplicate && (

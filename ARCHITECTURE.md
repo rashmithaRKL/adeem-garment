@@ -16,13 +16,19 @@ payroll) additive instead of invasive.
         lines/              production line screens
         orders/             order screens
         analytics/          efficiency and buyer mix
+        quality/            inspection reports: parsing, import, line-wise screens
+        hr/                 carder and attendance: sheet parser, import, HR screen
+        loading/            loading plan: sheet parser, import, line-wise queue
         excel/              the whole upload pipeline (parse, detect, hash, compress, import)
+                            plus sheetKit.ts, the shared header matcher the HR and
+                            loading-plan parsers are built on, and templates.ts
         uploads/            upload lists, version history, upload details
         employees/          admin-only employee management
         audit/              admin-only audit log
         settings/           admin-only system settings
         notifications/      employee inbox
       components/           presentational primitives (Card, Kpi, StatusChip, ProgressBar, Table)
+        charts/             Donut, BarChart, LineChart, RankedBars + the series palette
       layouts/              AdminLayout, EmployeeLayout, AuthLayout
       lib/                  supabase client, env, formatters, error mapping
       types/                database.ts (generated), domain.ts (hand-written)
