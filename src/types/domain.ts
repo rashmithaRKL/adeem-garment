@@ -1,4 +1,18 @@
-export type UserRole = 'admin' | 'employee';
+/**
+ * Ranked, most powerful first. A manager runs the factory — every management
+ * screen and the writes behind them — while an admin additionally holds the
+ * three things that are not delegated: accounts, roles and the audit trail.
+ */
+export type UserRole = 'admin' | 'manager' | 'employee';
+
+/** Everyone who works on the management side, as opposed to the floor. */
+export const MANAGEMENT_ROLES: UserRole[] = ['admin', 'manager'];
+
+export const ROLE_LABEL: Record<UserRole, string> = {
+  admin: 'Admin',
+  manager: 'Manager',
+  employee: 'Employee'
+};
 export type UserStatus = 'active' | 'disabled';
 export type LineStatus = 'running' | 'behind' | 'changeover' | 'idle';
 export type ProcessingState = 'pending' | 'scanning' | 'imported' | 'warnings' | 'failed';

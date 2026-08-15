@@ -7,13 +7,12 @@ import { Modal } from '@/components/Modal';
 import { SearchInput, useSearch, useSearchTerm } from '@/components/SearchInput';
 import { formatNumber, formatDate } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { useIsManager } from '@/features/auth/AuthProvider';
 import { fetchOrders, deleteOrder, type OrderRow } from './queries';
 
 export function OrdersPage() {
   const queryClient = useQueryClient();
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const canManage = useIsManager();
   const { data, isLoading, error } = useQuery({ queryKey: ['orders'], queryFn: fetchOrders });
 
   const [term, setTerm] = useSearchTerm();
@@ -59,7 +58,7 @@ export function OrdersPage() {
                   <th>Order</th><th>Buyer</th><th>Style</th><th>Line</th>
                   <th className="num">Ordered</th><th className="num">Produced</th><th className="num">Remaining</th>
                   <th>Delivery</th><th>Status</th>
-                  {isAdmin && <th />}
+                  {canManage && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -74,7 +73,7 @@ export function OrdersPage() {
                     <td className="num" style={{ color: 'var(--amber-500)' }}>{formatNumber(o.remaining_quantity)}</td>
                     <td>{formatDate(o.delivery_date)}</td>
                     <td><StatusChip status={o.production_status} /></td>
-                    {isAdmin && (
+                    {canManage && (
                       <td className="num">
                         <button type="button" className="btn btn--ghost btn--small"
                           style={{ color: 'var(--red-500)' }}

@@ -5,6 +5,7 @@ import { useAuth } from '@/features/auth/AuthProvider';
 // Importing also lets Vite fingerprint the file, so a new logo can never be cached.
 import logoUrl from '@/assets/adeem-logo.png';
 import { useTheme } from '@/lib/theme';
+import { ROLE_LABEL } from '@/types/domain';
 
 export interface NavItem {
   to: string;
@@ -97,8 +98,8 @@ export function AppShell({ sections, titles }: AppShellProps) {
               <span style={{ display: 'block', font: '600 13px/1.2 var(--font-body)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {profile?.fullName}
               </span>
-              <span style={{ fontSize: 11, color: 'var(--text-faint)', textTransform: 'capitalize' }}>
-                {profile?.role} · {profile?.employeeId}
+              <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                {profile ? ROLE_LABEL[profile.role] : ''} · {profile?.employeeId}
               </span>
             </span>
             <ThemeToggle where="rail" />

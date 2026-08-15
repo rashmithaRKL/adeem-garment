@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import type { Profile } from '@/types/domain';
+import { MANAGEMENT_ROLES, type Profile } from '@/types/domain';
 
 interface AuthState {
   session: Session | null;
@@ -131,4 +131,15 @@ export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
   return ctx;
+}
+
+/**
+ * True for the management side — admin or manager. Nearly every screen that used
+ * to ask "is this an admin?" meant this: may this person edit the factory's data,
+ * and do they see everyone's uploads or only their own. Only accounts, roles and
+ * the audit trail ask for `admin` specifically.
+ */
+export function useIsManager(): boolean {
+  const { profile } = useAuth();
+  return profile != null && MANAGEMENT_ROLES.includes(profile.role);
 }

@@ -1,7 +1,7 @@
 // Issues a 60-second signed URL for a stored archive, after checking permission.
 // Deploy: supabase functions deploy download-excel
 import { corsHeaders, json } from '../_shared/cors.ts';
-import { requireCaller, serviceClient, audit } from '../_shared/auth.ts';
+import { requireCaller, isManager, serviceClient, audit } from '../_shared/auth.ts';
 
 const SIGNED_URL_TTL_SECONDS = 60;
 
@@ -22,7 +22,8 @@ Deno.serve(async (req) => {
 
     if (error || !upload) return json({ error: 'Upload not found' }, 404);
 
-    const permitted = caller.role === 'admin' || upload.uploaded_by === caller.profileId;
+    // The management side sees every document; everyone else, only their own.
+    const permitted = isManager(caller.role) || upload.uploaded_by === caller.profileId;
     if (!permitted) {
       await audit(db, caller.profileId, 'ACCESS_DENIED',
         'Blocked download of upload ' + uploadId, { entity_type: 'excel_upload' });

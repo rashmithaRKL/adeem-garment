@@ -6,7 +6,7 @@ import { Modal } from '@/components/Modal';
 import { SearchInput, useSearch, useSearchTerm } from '@/components/SearchInput';
 import { formatDateTime, formatNumber } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { useIsManager } from '@/features/auth/AuthProvider';
 import { fetchQualityUploads, deleteQualityUpload, type QualityUploadRow } from './queries';
 import { REPORT_LABEL } from './types';
 
@@ -22,8 +22,7 @@ const period = (from: string | null, to: string | null): string => {
  */
 export function QualityUploadsCard({ showOwner = false }: { showOwner?: boolean }) {
   const queryClient = useQueryClient();
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const canManage = useIsManager();
   const { data, isLoading, error } = useQuery({
     queryKey: ['quality', 'uploads'],
     queryFn: fetchQualityUploads
@@ -69,7 +68,7 @@ export function QualityUploadsCard({ showOwner = false }: { showOwner?: boolean 
                 <th>File</th><th>Layout</th><th>Period</th>
                 {showOwner && <th>By</th>}
                 <th className="num">Inspections</th><th className="num">Defects</th><th>Imported</th>
-                {isAdmin && <th />}
+                {canManage && <th />}
               </tr>
             </thead>
             <tbody>
@@ -87,7 +86,7 @@ export function QualityUploadsCard({ showOwner = false }: { showOwner?: boolean 
                   <td className="num">{formatNumber(u.inspection_rows)}</td>
                   <td className="num">{formatNumber(u.defect_rows)}</td>
                   <td style={{ fontSize: 12.5 }}>{formatDateTime(u.created_at)}</td>
-                  {isAdmin && (
+                  {canManage && (
                     <td className="num">
                       <button type="button" className="btn btn--ghost btn--small"
                         style={{ color: 'var(--red-500)' }}

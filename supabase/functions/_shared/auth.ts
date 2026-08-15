@@ -1,8 +1,13 @@
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+export type CallerRole = 'admin' | 'manager' | 'employee';
+
+/** Admin and manager are the management side; employee is the floor. */
+export const isManager = (role: CallerRole): boolean => role === 'admin' || role === 'manager';
+
 export interface Caller {
   profileId: string;
-  role: 'admin' | 'employee';
+  role: CallerRole;
   fullName: string;
 }
 
@@ -39,9 +44,17 @@ export async function requireCaller(req: Request): Promise<Caller> {
   return { profileId: profile.id, role: profile.role, fullName: profile.full_name };
 }
 
+/** Strictly the administrator: accounts, roles and the audit trail. */
 export async function requireAdmin(req: Request): Promise<Caller> {
   const caller = await requireCaller(req);
   if (caller.role !== 'admin') throw new Response('Forbidden', { status: 403 });
+  return caller;
+}
+
+/** The management side — anything a manager is trusted to run. */
+export async function requireManager(req: Request): Promise<Caller> {
+  const caller = await requireCaller(req);
+  if (!isManager(caller.role)) throw new Response('Forbidden', { status: 403 });
   return caller;
 }
 

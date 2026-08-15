@@ -9,7 +9,7 @@ import { SearchInput, useSearch, useSearchTerm } from '@/components/SearchInput'
 import { Donut, BarChart, LineChart, RankedBars } from '@/components/charts';
 import { formatNumber, formatPercent, formatDate } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { useAuth, useIsManager } from '@/features/auth/AuthProvider';
 import { downloadHrTemplate } from '@/features/excel/templates';
 import { fetchHrRows, buildHrOverview, type HrRow } from './queries';
 import {
@@ -32,7 +32,7 @@ const BLANK: HrEdit = {
 export function HRPage() {
   const queryClient = useQueryClient();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const canManage = useIsManager();
 
   const rows = useQuery({ queryKey: ['hr', 'rows'], queryFn: fetchHrRows });
   const [term, setTerm] = useSearchTerm();
@@ -64,7 +64,7 @@ export function HRPage() {
 
   return (
     <>
-      {isAdmin && (
+      {canManage && (
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 260px', minWidth: 0 }}>
             <SearchInput value={term} onChange={setTerm}
@@ -93,7 +93,7 @@ export function HRPage() {
         error={rows.error}
         isEmpty={all.length === 0}
         emptyTitle="No attendance recorded yet"
-        emptyBody={isAdmin
+        emptyBody={canManage
           ? 'Two ways in: upload an attendance workbook on the Upload Excel screen — any sheet with date, carder, present and absent columns is recognised — or use “Add day” to type one in. Everything on this screen is derived from those entries.'
           : 'Manpower figures appear once an administrator records a day.'}
       >
@@ -211,7 +211,7 @@ export function HRPage() {
                   <th className="num">Direct</th><th className="num">Indirect</th>
                   <th className="num">Present</th><th className="num">Absent</th>
                   <th className="num">Leave</th><th className="num">Absenteeism</th>
-                  {isAdmin && <th />}
+                  {canManage && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -231,7 +231,7 @@ export function HRPage() {
                         fontWeight: 600,
                         color: pct >= 10 ? 'var(--red-500)' : pct >= 5 ? 'var(--amber-500)' : 'var(--green-500)'
                       }}>{formatPercent(pct)}</td>
-                      {isAdmin && (
+                      {canManage && (
                         <td className="num" style={{ whiteSpace: 'nowrap' }}>
                           <button type="button" className="btn btn--secondary btn--small"
                             onClick={() => setEditing({ row: r })}>Edit</button>

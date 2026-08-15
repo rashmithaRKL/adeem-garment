@@ -24,12 +24,18 @@ export function RequireAuth() {
   return <Outlet />;
 }
 
-export function RequireRole({ role }: { role: UserRole }) {
+/**
+ * Takes a role or a set of them, because the management side is now two roles
+ * wide. /admin/* admits both; the handful of screens inside it that are the
+ * administrator's alone name only 'admin'.
+ */
+export function RequireRole({ role }: { role: UserRole | UserRole[] }) {
   const { profile, loading, profileError } = useAuth();
+  const allowed = Array.isArray(role) ? role : [role];
 
   if (loading) return <FullPageSpinner label="Checking your access" />;
   if (!profile) return <ProfileUnavailablePage reason={profileError} />;
-  if (profile.role !== role) {
+  if (!allowed.includes(profile.role)) {
     // Typing /admin/employees as an employee lands here. The Edge Functions and
     // RLS would refuse the data anyway; this is only the first of four gates.
     return <Navigate to="/unauthorized" replace />;
@@ -37,9 +43,13 @@ export function RequireRole({ role }: { role: UserRole }) {
   return <Outlet />;
 }
 
+/** Where a role lands when it arrives at "/". */
+export const homeFor = (role: UserRole): string =>
+  role === 'employee' ? '/employee/dashboard' : '/admin/dashboard';
+
 export function RedirectByRole() {
   const { profile, loading, profileError } = useAuth();
   if (loading) return <FullPageSpinner label="Loading" />;
   if (!profile) return <ProfileUnavailablePage reason={profileError} />;
-  return <Navigate to={profile.role === 'admin' ? '/admin/dashboard' : '/employee/dashboard'} replace />;
+  return <Navigate to={homeFor(profile.role)} replace />;
 }

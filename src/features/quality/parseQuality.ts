@@ -31,6 +31,9 @@ const text = (v: unknown): string | null => {
   return t.length > 0 ? t : null;
 };
 
+/** A heading that is only a number is a working cell, not a label. */
+const isNumeric = (v: string): boolean => /^-?[\d,]+(\.\d+)?$/.test(v.trim());
+
 const int = (v: unknown): number | null => {
   if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : null;
   const t = String(v ?? '').replace(/[,\s]/g, '');
@@ -87,24 +90,32 @@ const yearFromName = (fileName: string): number =>
 // Stage bands
 // ---------------------------------------------------------------------------
 
+/**
+ * A stage banner, or 'ignored' for a block that is recognised but not imported.
+ * Pre final is the only one: the client does not want it reported, yet it still
+ * has to be matched, because a band runs to the column before the next banner —
+ * unrecognised, its columns would be read as part of Appearance.
+ */
+type BandLabel = QualityStage | 'ignored';
+
 /** Order matters: "PRE FINAL" must be tested before "FINAL". */
-function stageOf(raw: unknown): QualityStage | null {
+function stageOf(raw: unknown): BandLabel | null {
   const k = norm(raw);
   if (!k) return null;
   if (k.includes('aql')) return 'aql';
   if (k.includes('inline')) return 'in_line';
   if (k.includes('endline')) return 'end_line';
   if (k.includes('appearance')) return 'appearance';
-  if (k.includes('prefinal')) return 'pre_final';
+  if (k.includes('prefinal')) return 'ignored';
   if (k.includes('final')) return 'final';
   return null;
 }
 
-interface Band { stage: QualityStage; start: number; end: number; }
+interface Band { stage: BandLabel; start: number; end: number; }
 
 /** The banner row names each stage once, above the block of columns it owns. */
 function bandsOf(row: unknown[]): Band[] {
-  const marks: { stage: QualityStage; at: number }[] = [];
+  const marks: { stage: BandLabel; at: number }[] = [];
   row.forEach((cell, i) => {
     const stage = stageOf(cell);
     if (stage && !marks.some((m) => m.stage === stage)) marks.push({ stage, at: i });
@@ -139,15 +150,16 @@ interface StageCols {
   checked: number; passQty: number; defectQty: number; passPct: number; defectPct: number;
 }
 
+/** Ignored bands are located and then dropped, so nothing downstream sees them. */
 function resolveBands(band: unknown[], sub: unknown[], spec: ColSpec): StageCols[] {
-  return bandsOf(band).map((b) => ({
+  return bandsOf(band).flatMap((b) => (b.stage === 'ignored' ? [] : [{
     stage: b.stage,
     checked: findCol(sub, b.start, b.end, spec.checked),
     passQty: spec.passQty ? findCol(sub, b.start, b.end, spec.passQty) : -1,
     defectQty: spec.defectQty ? findCol(sub, b.start, b.end, spec.defectQty) : -1,
     passPct: spec.passPct ? findCol(sub, b.start, b.end, spec.passPct) : -1,
     defectPct: spec.defectPct ? findCol(sub, b.start, b.end, spec.defectPct) : -1
-  }));
+  }]));
 }
 
 const at = (row: unknown[], i: number): unknown => (i >= 0 ? row[i] : null);
@@ -349,7 +361,7 @@ function parseDailyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseRes
     if (id.isFactory && wrote) break;
   }
 
-  const defects = dailyDefects(grid, bandRow, date);
+  const defects = defectBlock(grid, bandRow, { inspectionDate: date, periodMonth: null });
   return finish('daily_quality', inspections, defects, [name],
     wb.SheetNames.slice(1).map((s) => ({ sheet: s, reason: 'not the report sheet' })),
     warnings, fileName, linesSeen);
@@ -360,10 +372,26 @@ function parseDailyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseRes
  * with repeated Line columns, so it is read by locating its own header row and
  * matching category names, and it is best-effort: a layout change costs the defect
  * breakdown, never the inspection figures above.
+ *
+ * The daily sheets start the block at column 0 while the monthly ones indent it to
+ * wherever the typist left room, so the block is found by its "Line" header rather
+ * than by a fixed column. Both are dated by the caller: a defect row must carry the
+ * same grain as the inspections it came from, or the screen's period filter drops it.
  */
-function dailyDefects(grid: Grid, bandRow: number, date: string | null): DefectRow[] {
-  const headerIdx = grid.findIndex((r, i) =>
-    i > bandRow && norm(r[0]) === 'line' && r.some((c) => /qty/.test(norm(c))));
+function defectBlock(
+  grid: Grid,
+  fromRow: number,
+  dating: { inspectionDate: string | null; periodMonth: string | null }
+): DefectRow[] {
+  let headerIdx = -1;
+  let lineCol = -1;
+  for (let i = fromRow + 1; i < grid.length; i += 1) {
+    const at = grid[i]!.findIndex((c) => norm(c) === 'line');
+    if (at < 0 || !grid[i]!.some((c) => /qty/.test(norm(c)))) continue;
+    headerIdx = i;
+    lineCol = at;
+    break;
+  }
   if (headerIdx < 0) return [];
 
   const header = grid[headerIdx]!;
@@ -375,17 +403,24 @@ function dailyDefects(grid: Grid, bandRow: number, date: string | null): DefectR
    */
   const banner = grid[headerIdx - 1] ?? [];
   const bannerAt = (col: number): string | null => {
-    for (let i = col; i > 0; i -= 1) {
+    // Stops at the Line column: anything at or left of it is the block's own
+    // title ("Appearance Defect Summery"), which names no category.
+    for (let i = col; i > lineCol; i -= 1) {
       const label = text(banner[i]);
-      if (label) return label.replace(/\s+/g, ' ').trim();
+      if (label && !isNumeric(label)) return label.replace(/\s+/g, ' ').trim();
     }
-    return null; // column 0 holds the block title, which names nothing
+    return null;
   };
 
   const categories: { col: number; name: string }[] = [];
   header.forEach((cell, i) => {
+    if (i <= lineCol) return;
     const label = text(cell);
     if (!label) return;
+    // The sheets keep working columns off to the right of the block -- a bare
+    // count with no heading. A defect category is a name, never a number, so a
+    // numeric header is scratch space rather than a category to import.
+    if (isNumeric(label)) return;
     const k = norm(label);
     if (['line', 'checkqty', 'total', ''].includes(k)) return;
     if (k === 'defect' || k === 'totaldefect') return; // derived columns, not categories
@@ -399,12 +434,12 @@ function dailyDefects(grid: Grid, bandRow: number, date: string | null): DefectR
 
   const out: DefectRow[] = [];
   for (let r = headerIdx + 1; r < grid.length; r += 1) {
-    const id = rowIdentity(grid[r]![0]);
+    const id = rowIdentity(grid[r]![lineCol]);
     if (!id) continue;
     for (const cat of categories) {
       const qty = int(grid[r]![cat.col]);
       if (qty == null || qty === 0) continue;
-      out.push({ ...id, inspectionDate: date, periodMonth: null, category: cat.name, qty });
+      out.push({ ...id, ...dating, category: cat.name, qty });
     }
     if (id.isFactory) break;
   }
@@ -437,6 +472,7 @@ function aqlMonthly(sub: unknown[]): StageCols | null {
 
 function parseMonthlyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseResult {
   const inspections: InspectionRow[] = [];
+  const defects: DefectRow[] = [];
   const used: string[] = [];
   const skipped: { sheet: string; reason: string }[] = [];
   const warnings: string[] = [];
@@ -464,6 +500,9 @@ function parseMonthlyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseR
 
     const teamCol = findCol(sub, 0, sub.length - 1, [/^teamno$/, /^line$/]);
     let wrote = 0;
+    // Where the stage table ended, so the defect block below it is looked for
+    // after the Factory roll-up rather than among the stage columns.
+    let endRow = bandRow;
     for (let r = bandRow + 2; r < grid.length; r += 1) {
       const row = grid[r]!;
       const id = rowIdentity(row[teamCol >= 0 ? teamCol : 0]);
@@ -479,14 +518,21 @@ function parseMonthlyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseR
         });
         any = true; wrote += 1;
       }
+      endRow = r;
       if (id.isFactory && any) break;
     }
+
+    // The monthly sheets carry the same Appearance Defect Summary as the daily
+    // ones, indented under the stage table. It was being skipped, which is why
+    // the defect panels emptied out the moment the screen switched to Monthly.
+    defects.push(...defectBlock(grid, endRow, { inspectionDate: null, periodMonth: month }));
+
     if (wrote > 0) used.push(name);
     else skipped.push({ sheet: name, reason: 'no team rows with figures' });
   }
 
   if (!used.length) warnings.push('No sheet in this workbook contained monthly quality figures.');
-  return finish('monthly_quality', inspections, [], used, skipped, warnings, fileName, linesSeen);
+  return finish('monthly_quality', inspections, defects, used, skipped, warnings, fileName, linesSeen);
 }
 
 // ---------------------------------------------------------------------------

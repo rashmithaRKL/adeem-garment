@@ -6,20 +6,20 @@ import { QueryState } from '@/components/QueryState';
 import { StatusChip } from '@/components/StatusChip';
 import { formatBytes, formatDateTime, formatNumber } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { useAuth, useIsManager } from '@/features/auth/AuthProvider';
 import { downloadOriginal } from '@/features/excel/importService';
 import { fetchAllUploads, fetchMyUploads, groupByDocument } from './queries';
 import { QualityUploadsCard } from '@/features/quality/QualityUploadsCard';
 
 export function UploadHistoryPage() {
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const canManage = useIsManager();
   const [message, setMessage] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['uploads', isAdmin ? 'all' : 'mine', profile?.id],
-    queryFn: () => (isAdmin ? fetchAllUploads() : fetchMyUploads(profile!.id)),
+    queryKey: ['uploads', canManage ? 'all' : 'mine', profile?.id],
+    queryFn: () => (canManage ? fetchAllUploads() : fetchMyUploads(profile!.id)),
     enabled: Boolean(profile)
   });
 
@@ -37,14 +37,14 @@ export function UploadHistoryPage() {
   }
 
   const groups = groupByDocument(data ?? []);
-  const base = isAdmin ? '/admin/uploads/' : '/employee/history/';
+  const base = canManage ? '/admin/uploads/' : '/employee/history/';
 
   return (
     <>
     <Card
-      title={isAdmin ? 'All documents' : 'My documents'}
+      title={canManage ? 'All documents' : 'My documents'}
       aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-        {isAdmin ? 'every upload across the factory' : "other employees' files are filtered by RLS"}
+        {canManage ? 'every upload across the factory' : "other employees' files are filtered by RLS"}
       </span>}
     >
       {message && <p className="banner banner--info">{message}</p>}
@@ -71,7 +71,7 @@ export function UploadHistoryPage() {
                     disabled={busyId === latest.id} onClick={() => void download(latest.id)}>
                     {busyId === latest.id ? 'Preparing…' : 'Download original'}
                   </button>
-                  {!isAdmin && (
+                  {!canManage && (
                     <Link className="btn btn--secondary btn--small" to="/employee/upload" style={{ textDecoration: 'none' }}>
                       Re-upload
                     </Link>
@@ -104,7 +104,7 @@ export function UploadHistoryPage() {
     </Card>
 
     <div style={{ marginTop: 16 }}>
-      <QualityUploadsCard showOwner={isAdmin} />
+      <QualityUploadsCard showOwner={canManage} />
     </div>
     </>
   );

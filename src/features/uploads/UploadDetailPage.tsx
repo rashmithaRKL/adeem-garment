@@ -6,13 +6,13 @@ import { QueryState } from '@/components/QueryState';
 import { StatusChip } from '@/components/StatusChip';
 import { formatBytes, formatDateTime, compressionRatio, formatNumber } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { useIsManager } from '@/features/auth/AuthProvider';
 import { downloadOriginal } from '@/features/excel/importService';
 import { fetchUpload } from './queries';
 
 export function UploadDetailPage() {
   const { uploadId } = useParams<{ uploadId: string }>();
-  const { profile } = useAuth();
+  const canManage = useIsManager();
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -22,7 +22,7 @@ export function UploadDetailPage() {
     enabled: Boolean(uploadId)
   });
 
-  const backTo = profile?.role === 'admin' ? '/admin/uploads' : '/employee/history';
+  const backTo = canManage ? '/admin/uploads' : '/employee/history';
 
   async function download() {
     if (!uploadId) return;

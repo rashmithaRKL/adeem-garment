@@ -1,5 +1,11 @@
+/**
+ * Pre final is deliberately absent. The KPI sheets carry a PRE FINAL block, but
+ * the client does not want that gate reported, so it is dropped at the parser
+ * rather than hidden at the screen — a stage nobody reports on should not be
+ * sitting in the totals either.
+ */
 export type QualityStage =
-  | 'in_line' | 'end_line' | 'appearance' | 'pre_final' | 'final' | 'aql';
+  | 'in_line' | 'end_line' | 'appearance' | 'final' | 'aql';
 
 export type QualityReportKind =
   | 'line_kpi' | 'daily_quality' | 'monthly_quality' | 'monthly_inspection' | 'defect_summary';
@@ -54,7 +60,6 @@ export const STAGE_LABEL: Record<QualityStage, string> = {
   in_line: 'In line',
   end_line: 'End line',
   appearance: 'Appearance',
-  pre_final: 'Pre final',
   final: 'Final',
   aql: 'AQL audit'
 };

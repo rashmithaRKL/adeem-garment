@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom';
 import { RequireAuth, RequireRole, RedirectByRole } from './guards';
+import { MANAGEMENT_ROLES } from '@/types/domain';
 import { AdminLayout } from '@/layouts/AdminLayout';
 import { EmployeeLayout } from '@/layouts/EmployeeLayout';
 import { LoginPage } from '@/features/auth/LoginPage';
@@ -35,7 +36,9 @@ export const router = createBrowserRouter([
       { path: '/', element: <RedirectByRole /> },
       {
         // Every /admin/* path passes through RequireRole before its layout mounts.
-        element: <RequireRole role="admin" />,
+        // The management side is two roles wide and they see the same screens:
+        // admin and manager differ only in what the Quality page shows them.
+        element: <RequireRole role={MANAGEMENT_ROLES} />,
         children: [{
           path: '/admin',
           element: <AdminLayout />,

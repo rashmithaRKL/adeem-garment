@@ -11,7 +11,7 @@ import { fetchLinePerformance } from '@/features/dashboard/queries';
 import { useRealtimeDashboard } from '@/features/dashboard/useRealtimeDashboard';
 import { fetchQualityByLine } from '@/features/quality/queries';
 import { fetchNextStyles } from '@/features/loading/queries';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { useIsManager } from '@/features/auth/AuthProvider';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
 import { useTilt } from '@/lib/motion';
 import {
@@ -26,8 +26,7 @@ const BLANK: LineEdit = {
 export function LinesPage() {
   useRealtimeDashboard();
   const queryClient = useQueryClient();
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const canManage = useIsManager();
 
   const perf = useQuery({ queryKey: ['dashboard', 'lines'], queryFn: () => fetchLinePerformance() });
   const all = useQuery({ queryKey: ['lines', 'all'], queryFn: fetchAllLines });
@@ -69,7 +68,7 @@ export function LinesPage() {
 
   return (
     <>
-      {isAdmin && (
+      {canManage && (
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 4 }}>
           <div style={{ flex: '1 1 260px', minWidth: 0 }}>
             <SearchInput value={term} onChange={setTerm}
@@ -87,7 +86,7 @@ export function LinesPage() {
 
       <QueryState isLoading={all.isLoading} error={all.error} isEmpty={rows.length === 0}
         emptyTitle="No production lines"
-        emptyBody={isAdmin
+        emptyBody={canManage
           ? 'Use “Add line” above, or import a quality report — the lines it names are created automatically.'
           : 'Lines appear once an administrator adds them.'}>
       <div className="grid grid--cards">
@@ -208,7 +207,7 @@ export function LinesPage() {
               )}
             </div>
 
-            {isAdmin && (
+            {canManage && (
               <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
                 <button type="button" className="btn btn--secondary btn--small"
                   onClick={() => setEditing({ row })}>Edit</button>

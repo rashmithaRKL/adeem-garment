@@ -830,6 +830,7 @@ export interface Database {
     Functions: {
       current_profile_id: { Args: Record<PropertyKey, never>; Returns: string };
       is_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
+      is_manager: { Args: Record<PropertyKey, never>; Returns: boolean };
       register_production_line: {
         Args: { p_line_no: number; p_name?: string | null };
         Returns: string | null;
@@ -837,13 +838,13 @@ export interface Database {
     };
 
     Enums: {
-      user_role: 'admin' | 'employee';
+      user_role: 'admin' | 'manager' | 'employee';
       user_status: 'active' | 'disabled';
       line_status: 'running' | 'behind' | 'changeover' | 'idle';
       prod_status: 'pending' | 'in_production' | 'at_risk' | 'completed';
       delivery_status: 'on_time' | 'upcoming' | 'delayed' | 'completed';
       processing_state: 'pending' | 'scanning' | 'imported' | 'warnings' | 'failed';
-      quality_stage: 'in_line' | 'end_line' | 'appearance' | 'pre_final' | 'final' | 'aql';
+      quality_stage: 'in_line' | 'end_line' | 'appearance' | 'final' | 'aql';
       quality_report_kind:
         | 'line_kpi' | 'daily_quality' | 'monthly_quality' | 'monthly_inspection' | 'defect_summary';
     };

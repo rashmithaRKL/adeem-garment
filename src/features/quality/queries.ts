@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { STAGE_LABEL } from './types';
 import type { QualityReportKind, QualityStage } from './types';
 
 export interface QualityUploadRow {
@@ -91,6 +92,7 @@ export async function fetchQualityByLine(): Promise<Record<number, LineQuality>>
 
   const out: Record<number, LineQuality & { _stages: Set<string> }> = {};
   for (const r of (data ?? []) as (InspectionRow & { line_no: number })[]) {
+    if (!(r.stage in STAGE_LABEL)) continue; // see `reportable` below
     const c = r.checked_qty ?? 0;
     if (c <= 0) continue;
     const d = r.defect_qty ?? (r.pass_qty != null ? c - r.pass_qty : 0);
@@ -138,6 +140,17 @@ interface DefectRow {
   category: string;
   qty: number | null;
 }
+
+/**
+ * Rows for a stage the app no longer reports on are dropped on the way in. Pre
+ * final was removed at the client's request, and a database imported before that
+ * still holds its rows; left alone they would keep turning up in the pieces
+ * checked, the defect count and the stage chart, which is the opposite of
+ * removing the stage. `0010_drop_pre_final.sql` deletes them for good — this
+ * guard is what keeps the screens right until that migration is applied.
+ */
+const reportable = (rows: InspectionRow[]): InspectionRow[] =>
+  rows.filter((r) => r.stage in STAGE_LABEL);
 
 export type QualityBasis = 'daily' | 'monthly';
 
@@ -229,7 +242,7 @@ export async function fetchQualityRecords(): Promise<QualityRecords> {
   if (finalError) throw new Error(finalError.message);
 
   return {
-    inspections: (insData ?? []) as InspectionRow[],
+    inspections: reportable((insData ?? []) as InspectionRow[]),
     defects: (defData ?? []) as DefectRow[],
     lines: ((lineData ?? []) as { line_number: number; line_name: string | null }[])
       .filter((l) => l.line_number != null && l.line_number > 0)
@@ -550,7 +563,7 @@ export async function fetchQualityOverview(): Promise<QualityOverview> {
   if (defError) throw new Error(defError.message);
   if (lineError) throw new Error(lineError.message);
 
-  const all = (insData ?? []) as InspectionRow[];
+  const all = reportable((insData ?? []) as InspectionRow[]);
   const daily = all.filter((r) => r.inspection_date);
   const monthly = all.filter((r) => !r.inspection_date && r.period_month);
 

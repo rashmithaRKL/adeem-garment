@@ -7,11 +7,22 @@ import { SearchInput, useSearch, useSearchTerm } from '@/components/SearchInput'
 import { formatDateTime } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
 import { useAuth } from '@/features/auth/AuthProvider';
+import { ROLE_LABEL, type UserRole } from '@/types/domain';
 import {
   fetchEmployees, setEmployeeRole, setEmployeeStatus,
   updateEmployee, deleteEmployee, createEmployeeAccount,
   type ProfileRow, type EmployeeEdit, type NewEmployee
 } from './queries';
+
+/** Most powerful first, so the list reads as a ladder rather than an alphabet. */
+const ROLES: UserRole[] = ['admin', 'manager', 'employee'];
+
+/** Purple is the administrator, amber the manager, blue the floor. */
+const ROLE_TONE: Record<UserRole, { bg: string; fg: string }> = {
+  admin:    { bg: 'var(--purple-50)', fg: 'var(--purple-500)' },
+  manager:  { bg: 'var(--amber-50)',  fg: 'var(--amber-500)' },
+  employee: { bg: 'var(--blue-50)',   fg: 'var(--blue-500)' }
+};
 
 export function EmployeesPage() {
   const queryClient = useQueryClient();
@@ -31,7 +42,7 @@ export function EmployeesPage() {
     onSuccess: refresh
   });
   const changeRole = useMutation({
-    mutationFn: ({ id, role }: { id: string; role: 'admin' | 'employee' }) =>
+    mutationFn: ({ id, role }: { id: string; role: UserRole }) =>
       setEmployeeRole(id, role),
     onSuccess: refresh
   });
@@ -101,10 +112,9 @@ export function EmployeesPage() {
                       <td style={{ color: 'var(--text-muted)' }}>{e.email}</td>
                       <td>
                         <span className="chip" style={{
-                          background: e.role === 'admin' ? 'var(--purple-50)' : 'var(--blue-50)',
-                          color: e.role === 'admin' ? 'var(--purple-500)' : 'var(--blue-500)',
-                          textTransform: 'capitalize'
-                        }}>{e.role}</span>
+                          background: ROLE_TONE[e.role].bg,
+                          color: ROLE_TONE[e.role].fg
+                        }}>{ROLE_LABEL[e.role]}</span>
                       </td>
                       <td className="num">{e.uploadCount}</td>
                       <td style={{ color: 'var(--text-muted)' }}>{formatDateTime(e.created_at)}</td>
@@ -128,13 +138,21 @@ export function EmployeesPage() {
                             <span style={{ fontSize: 11.5, color: 'var(--text-faint)', alignSelf: 'center' }}>You</span>
                           ) : (
                             <>
-                              <button type="button" className="btn btn--secondary btn--small"
+                              {/* A picker rather than a toggle: with three roles
+                                  there is no single "the other one" to flip to. */}
+                              <select
+                                className="input"
+                                style={{ width: 'auto', padding: '6px 8px', fontSize: 12 }}
+                                aria-label={`Role for ${e.full_name}`}
+                                value={e.role}
                                 disabled={busy}
-                                onClick={() => changeRole.mutate({
-                                  id: e.id, role: e.role === 'admin' ? 'employee' : 'admin'
+                                onChange={(ev) => changeRole.mutate({
+                                  id: e.id, role: ev.target.value as UserRole
                                 })}>
-                                {e.role === 'admin' ? 'Make employee' : 'Make admin'}
-                              </button>
+                                {ROLES.map((r) => (
+                                  <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+                                ))}
+                              </select>
                               <button type="button" className="btn btn--secondary btn--small"
                                 disabled={busy}
                                 onClick={() => toggle.mutate({
@@ -291,9 +309,9 @@ function AddEmployee({ creating, error, result, onCancel, onCreate }: {
       </Field>
 
       <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
-        The account is created as an <strong>employee</strong>. Promote them to admin
-        from the list afterwards — a new account can never be given admin rights at
-        creation, so a mistake here cannot hand out the keys.
+        The account is created as an <strong>employee</strong>. Promote them to
+        manager or admin from the list afterwards — a new account can never be given
+        either at creation, so a mistake here cannot hand out the keys.
       </p>
     </Modal>
   );
@@ -350,9 +368,8 @@ function EditEmployee({ employee, isSelf, saving, error, onCancel, onSave }: {
 
       <Field label="Role">
         <select className="input" value={form.role} disabled={isSelf}
-          onChange={(e) => set('role', e.target.value as 'admin' | 'employee')}>
-          <option value="employee">Employee</option>
-          <option value="admin">Admin</option>
+          onChange={(e) => set('role', e.target.value as UserRole)}>
+          {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
         </select>
       </Field>
 

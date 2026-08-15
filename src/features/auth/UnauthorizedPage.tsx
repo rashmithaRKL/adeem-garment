@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom';
+import { homeFor } from '@/app/guards';
+import { ROLE_LABEL } from '@/types/domain';
 import { useAuth } from './AuthProvider';
 
 export function UnauthorizedPage() {
   const { profile } = useAuth();
-  const home = profile?.role === 'admin' ? '/admin/dashboard' : '/employee/dashboard';
+  const home = profile ? homeFor(profile.role) : '/employee/dashboard';
 
   return (
     <div className="state" style={{ minHeight: '100vh' }}>
@@ -13,7 +15,8 @@ export function UnauthorizedPage() {
       }} aria-hidden>⛔</span>
       <h1 style={{ fontSize: 34, margin: 0 }}>403 — Not authorized</h1>
       <p style={{ margin: 0, maxWidth: '52ch', fontSize: 14.5, lineHeight: 1.6 }}>
-        Your profile role is <strong>{profile?.role ?? 'unknown'}</strong>. This route requires <strong>admin</strong>.
+        Your profile role is <strong>{profile ? ROLE_LABEL[profile.role] : 'unknown'}</strong>.
+        {' '}This route is reserved for a higher role.
       </p>
       <p style={{ margin: 0, maxWidth: '56ch', fontSize: 12.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
         The check ran before any admin data was requested, and row level security would have refused

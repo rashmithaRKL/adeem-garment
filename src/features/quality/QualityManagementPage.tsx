@@ -6,22 +6,34 @@ import { QueryState } from '@/components/QueryState';
 import { Donut, BarChart, LineChart, seriesColor } from '@/components/charts';
 import { formatNumber, formatDate } from '@/lib/format';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
+import { useAuth } from '@/features/auth/AuthProvider';
 import {
   fetchQualityRecords, buildQualityMatrix,
-  type QualityBasis, type FinalStatus, type LineQualityRow, type QualityMatrix
+  type QualityBasis, type FinalStatus, type LineQualityRow, type QualityMatrix, type StageStat
 } from './queries';
 import { STAGE_LABEL, type QualityStage } from './types';
 
 /**
- * The gates the client asked to see line by line, in floor order. Pre final sits
- * here rather than beside Final: the KPI sheets record it per line every day, and
- * leaving it out threw away the one gate closest to shipping that the lines
- * actually measure. Final itself is the verdict column at the end of the row.
+ * The gates the client asked to see line by line, in floor order. Final is not
+ * among them: it is the verdict column at the end of the row instead.
  */
-const COLUMNS: QualityStage[] = ['in_line', 'end_line', 'appearance', 'pre_final', 'aql'];
+const COLUMNS: QualityStage[] = ['in_line', 'end_line', 'appearance', 'aql'];
 
 /** The chart shows Final as well — a line that records it should be able to see it. */
 const CHART_STAGES: QualityStage[] = [...COLUMNS, 'final'];
+
+/**
+ * The gates that get a headline tile of their own, in the order the client reads
+ * them: the four sewing-floor gates from earliest to latest. AQL is not here —
+ * it is a sampled audit rather than a gate every piece passes through, so it
+ * keeps its own tile beside the factory-wide figures.
+ */
+const TILE_STAGES: { stage: QualityStage; icon: string }[] = [
+  { stage: 'in_line', icon: '🧵' },
+  { stage: 'end_line', icon: '🏁' },
+  { stage: 'appearance', icon: '👁️' },
+  { stage: 'final', icon: '📦' }
+];
 
 const FINAL_LABEL: Record<FinalStatus, string> = {
   passed: 'Passed',
@@ -55,6 +67,7 @@ const shortPeriod = (period: string, basis: QualityBasis): string =>
 export function QualityManagementPage() {
   const [basis, setBasis] = useState<QualityBasis>('daily');
   const [period, setPeriod] = useState<string | null>(null);
+  const { profile } = useAuth();
 
   const records = useQuery({ queryKey: ['quality', 'records'], queryFn: fetchQualityRecords });
   const data = records.data ?? { inspections: [], defects: [], lines: [], finals: [] };
@@ -62,6 +75,17 @@ export function QualityManagementPage() {
   // The period picker is per basis, so switching basis drops a selection that
   // no longer names anything — the builder falls back to every period.
   const matrix = buildQualityMatrix(data, basis, period, EFFICIENCY_THRESHOLD);
+
+  /**
+   * The manager's tile, and only the manager's. Rejection is the same figures as
+   * the pass rate read the other way up, and the client wants that framing to sit
+   * with the person who answers for the floor — not with the administrator, who
+   * outranks them everywhere else but does not run the lines.
+   */
+  const showRejection = profile?.role === 'manager';
+
+  // matrix.stages is ordered by volume for the charts; the tiles want it by name.
+  const byStage = new Map(matrix.stages.map((s) => [s.stage, s]));
 
   const stageSeries = CHART_STAGES.map((stage, i) => ({
     key: stage, label: STAGE_LABEL[stage], color: seriesColor(i)
@@ -108,7 +132,8 @@ export function QualityManagementPage() {
         </select>
 
         <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-          Pass, rejection and final inspection are judged against the {EFFICIENCY_THRESHOLD}% threshold.
+          Pass{showRejection && ', rejection'} and final inspection are judged against
+          the {EFFICIENCY_THRESHOLD}% threshold.
         </span>
       </div>
 
@@ -133,12 +158,18 @@ export function QualityManagementPage() {
             tone={(matrix.passPct ?? 0) >= EFFICIENCY_THRESHOLD ? 'green' : 'red'}
             value={pctText(matrix.passPct)}
             sub={'target ' + EFFICIENCY_THRESHOLD + '%'} />
-          <Kpi index={2} label="Rejection" icon="🚫" tone="orange"
-            value={pctText(matrix.rejectionPct)}
-            sub={formatNumber(matrix.defects) + ' defects found'} />
-          <Kpi index={3} label="AQL audit" icon="📐" tone="purple"
+          <Kpi index={2} label="AQL audit" icon="📐" tone="purple"
             value={pctText(matrix.aqlPassPct)}
             sub={matrix.aqlPassPct == null ? 'no AQL rows in this report' : 'sampled pass rate'} />
+          {TILE_STAGES.map(({ stage, icon }, i) => (
+            <StageKpi key={stage} stage={stage} icon={icon} index={3 + i}
+              stat={byStage.get(stage)} />
+          ))}
+          {showRejection && (
+            <Kpi index={7} label="Rejection" icon="🚫" tone="orange"
+              value={pctText(matrix.rejectionPct)}
+              sub={formatNumber(matrix.defects) + ' defects found'} />
+          )}
         </div>
 
         <Card title="Pass rate by line and stage" style={{ marginTop: 16 }}
@@ -214,24 +245,29 @@ export function QualityManagementPage() {
             {matrix.period ? periodLabel(matrix.period, basis) : 'all periods'}
           </span>}>
           <div className="table-scroll">
-            <table className="table" style={{ minWidth: 960 }}>
+            <table className="table" style={{ minWidth: 860 }}>
               <thead>
                 <tr>
                   <th>Line</th>
                   {COLUMNS.map((stage) => <th key={stage} className="num">{STAGE_LABEL[stage]}</th>)}
                   <th className="num">Checked</th>
                   <th className="num">Defects</th>
-                  <th className="num">Rejection</th>
+                  {/* The same rule as the tile: leaving the column here while
+                      hiding the tile would hide nothing at all. */}
+                  {showRejection && <th className="num">Rejection</th>}
                   <th>Final inspection</th>
                 </tr>
               </thead>
               <tbody>
-                {matrix.lines.map((line) => <LineRow key={line.key} line={line} />)}
+                {matrix.lines.map((line) => (
+                  <LineRow key={line.key} line={line} showRejection={showRejection} />
+                ))}
               </tbody>
             </table>
           </div>
           <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
-            Rejection is defects found for every hundred pieces checked. Final inspection is
+            {showRejection && 'Rejection is defects found for every hundred pieces checked. '}
+            Final inspection is
             the pass rate of the final gate on its own, so a line can clear every earlier stage
             and still read below target here. A line reads “Not inspected” when the reports
             imported for this period record no final gate for it — the pre-shipment audit above
@@ -240,6 +276,34 @@ export function QualityManagementPage() {
         </Card>
       </QueryState>
     </>
+  );
+}
+
+/**
+ * One gate's pass rate as a headline tile. Coloured against the threshold rather
+ * than decoratively: the reason for putting every gate on the same row is to see
+ * at a glance which one is under target, and a palette chosen for variety would
+ * throw that away. A gate with nothing recorded reads "—" and stays neutral —
+ * an uninspected gate is not a failing one.
+ */
+function StageKpi({ stat, stage, icon, index }: {
+  stat: StageStat | undefined;
+  stage: QualityStage;
+  icon: string;
+  index: number;
+}) {
+  const passPct = stat?.passPct ?? null;
+  return (
+    <Kpi
+      index={index}
+      label={STAGE_LABEL[stage]}
+      icon={icon}
+      tone={passPct == null ? 'blue' : passPct >= EFFICIENCY_THRESHOLD ? 'green' : 'red'}
+      value={pctText(passPct)}
+      sub={stat
+        ? `${formatNumber(stat.checked)} checked · ${formatNumber(stat.defects)} defects`
+        : 'not inspected in this period'}
+    />
   );
 }
 
@@ -351,7 +415,7 @@ function FinalInspectionCard({ summary, month }: {
   );
 }
 
-function LineRow({ line }: { line: LineQualityRow }) {
+function LineRow({ line, showRejection }: { line: LineQualityRow; showRejection: boolean }) {
   const cell = (stage: QualityStage) => {
     const value = line.stages[stage];
     if (!value || value.passPct == null) {
@@ -374,12 +438,14 @@ function LineRow({ line }: { line: LineQualityRow }) {
       {COLUMNS.map(cell)}
       <td className="num">{formatNumber(line.checked)}</td>
       <td className="num">{formatNumber(line.defects)}</td>
-      <td className="num" style={{
-        fontWeight: 600,
-        color: (line.rejectionPct ?? 0) > 100 - EFFICIENCY_THRESHOLD ? 'var(--red-500)' : 'var(--text)'
-      }}>
-        {pctText(line.rejectionPct)}
-      </td>
+      {showRejection && (
+        <td className="num" style={{
+          fontWeight: 600,
+          color: (line.rejectionPct ?? 0) > 100 - EFFICIENCY_THRESHOLD ? 'var(--red-500)' : 'var(--text)'
+        }}>
+          {pctText(line.rejectionPct)}
+        </td>
+      )}
       <td>
         {/* Colour plus a word: the status never rides on the swatch alone. */}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}>

@@ -368,6 +368,11 @@ input:focus-visible {
 .table td { padding: 12px 14px 12px 0; border-top: 1px solid var(--border-soft); }
 .table tbody tr:hover { background: var(--surface-muted); }
 .num { text-align: right; }
+/* `.table th` sets its own alignment and outweighs `.num` on specificity, so a
+   numeric heading has to claim the right edge again — otherwise every heading
+   sat hard left while the figures beneath it sat hard right, and on a wide
+   column the two ended up an inch apart. */
+.table th.num { text-align: right; }
 .mono { font-family: var(--font-mono); font-size: 12.5px; }
 
 .btn {

@@ -44,8 +44,8 @@ const titles = {
   '/admin/upload':       { title: 'Upload Excel',         sub: 'Scan, validate, preview, import' },
   '/admin/uploads':      { title: 'Excel Uploads',        sub: 'Private bucket, originals preserved' },
   '/admin/history':      { title: 'Upload History',       sub: 'Every version is retained' },
-  '/admin/employees':    { title: 'Employees',            sub: 'Admin only — profiles and roles' },
-  '/admin/audit-logs':   { title: 'Audit Logs',           sub: 'Admin only — security events' },
+  '/admin/employees':    { title: 'Employees',            sub: 'Profiles and roles' },
+  '/admin/audit-logs':   { title: 'Audit Logs',           sub: 'Security events' },
   '/admin/settings':     { title: 'Settings',             sub: 'System configuration' }
 };
 

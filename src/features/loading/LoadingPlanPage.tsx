@@ -9,7 +9,7 @@ import { SearchInput, useSearch, useSearchTerm } from '@/components/SearchInput'
 import { Donut, BarChart, RankedBars, toSlices } from '@/components/charts';
 import { formatNumber, formatDate } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { useAuth, useIsManager } from '@/features/auth/AuthProvider';
 import { downloadPlanTemplate } from '@/features/excel/templates';
 import {
   fetchLoadingPlan, overdueMilestone, PLAN_STATUSES, PLAN_STATUS_LABEL,
@@ -46,7 +46,7 @@ const DATE_COLUMNS: { key: 'pp_date' | 'pcd' | 'psd' | 'ped'; label: string; tit
 export function LoadingPlanPage() {
   const queryClient = useQueryClient();
   const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const canManage = useIsManager();
 
   const plan = useQuery({ queryKey: ['loadingPlan'], queryFn: fetchLoadingPlan });
   const [term, setTerm] = useSearchTerm();
@@ -104,7 +104,7 @@ export function LoadingPlanPage() {
 
   return (
     <>
-      {isAdmin && (
+      {canManage && (
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ flex: '1 1 260px', minWidth: 0 }}>
             <SearchInput value={term} onChange={setTerm}
@@ -133,7 +133,7 @@ export function LoadingPlanPage() {
         error={plan.error}
         isEmpty={rows.length === 0}
         emptyTitle="No loading plan entered yet"
-        emptyBody={isAdmin
+        emptyBody={canManage
           ? 'Two ways in: upload a loading plan on the Upload Excel screen — any sheet with style, line and PP/PCD/PSD/PED columns is recognised — or use “Add style” to queue one by hand. The Production Line screen reads the next style from here.'
           : 'Upcoming styles appear once a planner enters them.'}
       >
@@ -222,7 +222,7 @@ export function LoadingPlanPage() {
                       <th className="num">Order qty</th>
                       {DATE_COLUMNS.map((c) => <th key={c.key} title={c.title}>{c.label}</th>)}
                       <th>Status</th>
-                      {isAdmin && <th />}
+                      {canManage && <th />}
                     </tr>
                   </thead>
                   <tbody>
@@ -249,7 +249,7 @@ export function LoadingPlanPage() {
                               background: 'var(--surface-muted)', color: STATUS_COLOR[r.status]
                             }}>{PLAN_STATUS_LABEL[r.status]}</span>
                           </td>
-                          {isAdmin && (
+                          {canManage && (
                             <td className="num" style={{ whiteSpace: 'nowrap' }}>
                               <button type="button" className="btn btn--secondary btn--small"
                                 onClick={() => setEditing({ row: r })}>Edit</button>

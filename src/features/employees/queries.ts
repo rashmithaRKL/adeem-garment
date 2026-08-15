@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { env } from '@/lib/env';
 import type { Database } from '@/types/database';
+import type { UserRole } from '@/types/domain';
 
 export type ProfileRow = Database['public']['Tables']['profiles']['Row'] & {
   uploadCount?: number;
@@ -27,7 +28,7 @@ export async function setEmployeeStatus(id: string, status: 'active' | 'disabled
   if (error) throw error;
 }
 
-export async function setEmployeeRole(id: string, role: 'admin' | 'employee') {
+export async function setEmployeeRole(id: string, role: UserRole) {
   const { error } = await supabase.from('profiles').update({ role }).eq('id', id);
   if (error) throw error;
 }
@@ -88,7 +89,7 @@ export async function createEmployeeAccount(input: NewEmployee): Promise<{ needs
 export interface EmployeeEdit {
   full_name: string;
   employee_id: string;
-  role: 'admin' | 'employee';
+  role: UserRole;
   status: 'active' | 'disabled';
 }
 

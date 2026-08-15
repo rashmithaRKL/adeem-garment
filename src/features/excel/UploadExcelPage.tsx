@@ -6,7 +6,7 @@ import { MAX_UPLOAD_BYTES } from '@/lib/env';
 import type { MappableField } from '@/types/domain';
 import { useUploadFlow, SCAN_STAGES } from './useUploadFlow';
 import { STAGE_LABEL } from '@/features/quality/types';
-import { useAuth } from '@/features/auth/AuthProvider';
+import { useIsManager } from '@/features/auth/AuthProvider';
 
 const FIELD_LABELS: Record<MappableField, string> = {
   lineNumber: 'Production line', orderNumber: 'Order number', buyer: 'Buyer',
@@ -39,9 +39,8 @@ export function UploadExcelPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   // The same flow is mounted under /admin and /employee, so every link back into
   // the app has to follow the caller rather than assume the employee portal.
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
-  const base = isAdmin ? '/admin' : '/employee';
+  const canManage = useIsManager();
+  const base = canManage ? '/admin' : '/employee';
   const currentIndex = STEPS.findIndex((s) => s.id === (STEP_ALIAS[state.step] ?? state.step));
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
@@ -430,19 +429,19 @@ export function UploadExcelPage() {
               </p>
             )}
 
-            {/* Both tables are admin-write under RLS, so the database would refuse
-                this import rather than the browser. Saying so before the attempt
-                beats a permission error after it. */}
-            {!isAdmin && (
+            {/* Both tables are management-write under RLS, so the database would
+                refuse this import rather than the browser. Saying so before the
+                attempt beats a permission error after it. */}
+            {!canManage && (
               <p className="banner banner--warning" style={{ marginTop: 12, marginBottom: 0 }}>
-                Only an administrator can import HR and loading-plan sheets. Send this file to
-                an administrator, or ask them to run the upload.
+                Only a manager or an administrator can import HR and loading-plan sheets.
+                Send this file to one of them, or ask them to run the upload.
               </p>
             )}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
               <button type="button" className="btn btn--success" onClick={() => void runSheetImport()}
-                disabled={state.sheet.rows.length === 0 || !isAdmin}>
+                disabled={state.sheet.rows.length === 0 || !canManage}>
                 Import &amp; update dashboard
               </button>
               <button type="button" className="btn btn--secondary" onClick={reset}>Cancel</button>
