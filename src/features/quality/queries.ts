@@ -68,57 +68,6 @@ export async function deleteQualityUpload(id: string) {
   if (error) throw new Error(error.message);
 }
 
-export interface LineQuality {
-  checked: number;
-  defects: number;
-  passPct: number | null;
-  lastSeen: string | null;
-  stages: number;
-}
-
-/**
- * Quality figures keyed by the line number printed on the sheet, so a screen built
- * around production_lines can show what a line's inspections say even when no
- * production output has ever been recorded for it.
- */
-export async function fetchQualityByLine(): Promise<Record<number, LineQuality>> {
-  const { data, error } = await supabase
-    .from('quality_inspections')
-    .select('line_no,stage,checked_qty,pass_qty,defect_qty,inspection_date,period_month')
-    .eq('is_factory', false)
-    .not('line_no', 'is', null)
-    .limit(5000);
-  if (error) throw new Error(error.message);
-
-  const out: Record<number, LineQuality & { _stages: Set<string> }> = {};
-  for (const r of (data ?? []) as (InspectionRow & { line_no: number })[]) {
-    if (!(r.stage in STAGE_LABEL)) continue; // see `reportable` below
-    const c = r.checked_qty ?? 0;
-    if (c <= 0) continue;
-    const d = r.defect_qty ?? (r.pass_qty != null ? c - r.pass_qty : 0);
-    const seen = r.inspection_date ?? r.period_month;
-
-    const acc = out[r.line_no] ?? { checked: 0, defects: 0, passPct: null, lastSeen: null, stages: 0, _stages: new Set<string>() };
-    acc.checked += c;
-    acc.defects += d;
-    acc._stages.add(r.stage);
-    if (seen && (!acc.lastSeen || seen > acc.lastSeen)) acc.lastSeen = seen;
-    out[r.line_no] = acc;
-  }
-
-  const final: Record<number, LineQuality> = {};
-  for (const [k, v] of Object.entries(out)) {
-    final[Number(k)] = {
-      checked: v.checked,
-      defects: v.defects,
-      passPct: rate(v.checked, v.defects),
-      lastSeen: v.lastSeen,
-      stages: v._stages.size
-    };
-  }
-  return final;
-}
-
 interface InspectionRow {
   line_no: number | null;
   line_label: string | null;
@@ -287,6 +236,12 @@ export interface QualityMatrix {
   lines: LineQualityRow[];
   stages: StageStat[];
   topDefects: DefectStat[];
+  /**
+   * True when the defect rows named their gate and the breakdown above was
+   * narrowed to end line and appearance; false when the report named none and
+   * every category it carried is shown instead.
+   */
+  defectsGated: boolean;
   /** Defect quantities per line for the top categories, in the same line order. */
   defectsByLine: { lineNo: number | null; label: string; byCategory: Record<string, number> }[];
   trend: TrendPoint[];
@@ -317,6 +272,85 @@ export interface FinalInspectionSummary {
   /** Defects per hundred pieces audited, across every month shown. */
   defectPct: number | null;
 }
+
+/**
+ * The gates every piece passes on the sewing floor, and the only ones counted
+ * into "pieces checked" and "defects".
+ *
+ * Final inspection and the AQL audit sample goods that were already counted at
+ * these three gates, so adding them in counts the same garments twice and drags
+ * the pass rate towards whatever the sample happened to say. Both still get their
+ * own figures on screen — the stage breakdown, the AQL tile and the pre-shipment
+ * card — they are simply not part of the floor totals.
+ */
+export const FLOOR_STAGES: QualityStage[] = ['in_line', 'end_line', 'appearance'];
+
+/**
+ * The gates whose defect categories are counted into the top-5 breakdown.
+ *
+ * In line is a running check on work still being sewn — the same piece is
+ * corrected and passes again — so its category counts describe rework rather
+ * than defects leaving the line. End line and appearance are the two gates that
+ * judge finished work, which is what the client reads the chart for.
+ */
+export const DEFECT_STAGES: QualityStage[] = ['end_line', 'appearance'];
+
+const onFloor = (stage: QualityStage): boolean => FLOOR_STAGES.includes(stage);
+
+/**
+ * The stage a defect category was counted at.
+ *
+ * The defect blocks on these sheets are two-tier: a banner naming one thing over
+ * sub-columns naming the other, which the parser flattens to "Uncut Threads (End
+ * Line)". The gate is therefore already written into the category, and reading it
+ * back here means the breakdown can be filtered by gate without re-importing a
+ * single workbook. A summary sheet that names no gate returns null.
+ */
+const STAGE_IN_CATEGORY: { stage: QualityStage; pattern: RegExp }[] = [
+  { stage: 'end_line', pattern: /\bend[\s-]*line\b/i },
+  { stage: 'appearance', pattern: /\bappearance\b/i },
+  { stage: 'in_line', pattern: /\bin[\s-]*line\b/i },
+  { stage: 'aql', pattern: /\baql\b/i },
+  { stage: 'final', pattern: /\bfinal\b/i }
+];
+
+export function defectStage(category: string): QualityStage | null {
+  return STAGE_IN_CATEGORY.find((s) => s.pattern.test(category))?.stage ?? null;
+}
+
+/**
+ * The category without the gate that qualifies it, so "Uncut Threads (End Line)"
+ * and "Uncut Threads (Appearance)" are one bar rather than two halves of one.
+ *
+ * Which half of the pair carries the gate depends on the typist: the daily block
+ * banners the defect over "End Line"/"Appearance" sub-columns, while the appearance
+ * summary banners the gate over the defect names. Removing the gate can therefore
+ * leave the remainder wrapped in, or holding one half of, the brackets that used to
+ * separate the two — so those are unwrapped here. Only unmatched brackets are
+ * dropped: a category that genuinely reads "Fabric (Knit)" keeps its own.
+ */
+export function defectCategory(category: string): string {
+  const stripped = STAGE_IN_CATEGORY
+    .reduce((text, s) => text.replace(s.pattern, ''), category)
+    .replace(/\(\s*\)/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  const tidy = trimDelimiters(unwrapParens(stripped));
+  return tidy.length > 0 ? tidy : category.trim();
+}
+
+const trimDelimiters = (text: string): string =>
+  text.replace(/^[\s\-–—/|]+/, '').replace(/[\s\-–—/|]+$/, '').trim();
+
+const unwrapParens = (text: string): string => {
+  const inner = /^\(([^()]+)\)$/.exec(text.trim());
+  if (inner) return inner[1]!.trim();
+  const opens = (text.match(/\(/g) ?? []).length;
+  const closes = (text.match(/\)/g) ?? []).length;
+  if (opens > closes && text.startsWith('(')) return text.slice(1).trim();
+  if (closes > opens && text.endsWith(')')) return text.slice(0, -1).trim();
+  return text;
+};
 
 const periodOf = (r: { inspection_date: string | null; period_month: string | null }, basis: QualityBasis) =>
   basis === 'daily' ? r.inspection_date : r.period_month;
@@ -371,8 +405,13 @@ export function buildQualityMatrix(
     // pass_qty is filled in far more often than defect_qty on the KPI sheets.
     const d = r.defect_qty ?? (r.pass_qty != null ? c - r.pass_qty : 0);
 
-    checked += c;
-    defects += d;
+    // Every stage keeps its own cell and its own tile; only the three floor gates
+    // are added into the totals, the line totals and the trend.
+    const counts = onFloor(r.stage);
+    if (counts) {
+      checked += c;
+      defects += d;
+    }
 
     const st = stageMap.get(r.stage) ?? { checked: 0, defects: 0 };
     stageMap.set(r.stage, { checked: st.checked + c, defects: st.defects + d });
@@ -387,13 +426,17 @@ export function buildQualityMatrix(
     cell.checked += c;
     cell.defects += d;
     line.stages[r.stage] = cell;
-    line.checked += c;
-    line.defects += d;
+    if (counts) {
+      line.checked += c;
+      line.defects += d;
+    }
     lineMap.set(key, line);
 
-    const p = periodOf(r, basis)!;
-    const bucket = periodMap.get(p) ?? { checked: 0, defects: 0 };
-    periodMap.set(p, { checked: bucket.checked + c, defects: bucket.defects + d });
+    if (counts) {
+      const p = periodOf(r, basis)!;
+      const bucket = periodMap.get(p) ?? { checked: 0, defects: 0 };
+      periodMap.set(p, { checked: bucket.checked + c, defects: bucket.defects + d });
+    }
   }
 
   const lines = [...lineMap.values()].map((line) => {
@@ -424,11 +467,27 @@ export function buildQualityMatrix(
     if (p == null) return false;
     return active ? p === active : true;
   });
-  const perLine = defectRows.filter((d) => !d.is_factory);
-  const chosen = perLine.length > 0 ? perLine : defectRows;
+
+  // End line and appearance, on whichever basis is showing. A monthly second
+  // summary is one column per category and names no gate at all; filtering that
+  // to two gates would empty the panel, so a report that never names a gate is
+  // charted whole and the caption says so.
+  const namesGates = defectRows.some((d) => defectStage(d.category) != null);
+  const scoped = namesGates
+    ? defectRows.filter((d) => {
+        const stage = defectStage(d.category);
+        return stage != null && DEFECT_STAGES.includes(stage);
+      })
+    : defectRows;
+
+  const perLine = scoped.filter((d) => !d.is_factory);
+  const chosen = perLine.length > 0 ? perLine : scoped;
 
   const catTotals = new Map<string, number>();
-  for (const d of chosen) catTotals.set(d.category, (catTotals.get(d.category) ?? 0) + (d.qty ?? 0));
+  for (const d of chosen) {
+    const name = defectCategory(d.category);
+    catTotals.set(name, (catTotals.get(name) ?? 0) + (d.qty ?? 0));
+  }
   const topDefects = [...catTotals.entries()]
     .map(([category, qty]) => ({ category, qty }))
     .sort((a, b) => b.qty - a.qty)
@@ -443,14 +502,15 @@ export function buildQualityMatrix(
     byLine.set(String(ref.lineNo), { lineNo: ref.lineNo, label: ref.label, byCategory: {} });
   }
   for (const d of perLine) {
-    if (!topNames.has(d.category)) continue;
+    const name = defectCategory(d.category);
+    if (!topNames.has(name)) continue;
     const key = d.line_no != null ? String(d.line_no) : (d.line_label ?? '—');
     const entry = byLine.get(key) ?? {
       lineNo: d.line_no,
       label: d.line_label ?? (d.line_no != null ? `Line ${d.line_no}` : '—'),
       byCategory: {} as Record<string, number>
     };
-    entry.byCategory[d.category] = (entry.byCategory[d.category] ?? 0) + (d.qty ?? 0);
+    entry.byCategory[name] = (entry.byCategory[name] ?? 0) + (d.qty ?? 0);
     byLine.set(key, entry);
   }
 
@@ -474,6 +534,7 @@ export function buildQualityMatrix(
       .map(([stage, v]) => ({ stage, checked: v.checked, defects: v.defects, passPct: rate(v.checked, v.defects) }))
       .sort((a, b) => b.checked - a.checked),
     topDefects,
+    defectsGated: namesGates,
     finalInspection,
     defectsByLine: [...byLine.values()].sort(byLineOrder),
     trend: [...periodMap.entries()]
@@ -592,11 +653,15 @@ export async function fetchQualityOverview(): Promise<QualityOverview> {
     const d = r.defect_qty ?? (r.pass_qty != null ? c - r.pass_qty : 0);
     if (c <= 0) continue;
 
-    checked += c;
-    defects += d;
-
+    // Same rule as the Quality Management screen: the three floor gates make up
+    // the totals, and the sampled gates keep their own stage figures. Two screens
+    // reporting different "pieces checked" for the same reports is a bug.
     const st = stageMap.get(r.stage) ?? { checked: 0, defects: 0 };
     stageMap.set(r.stage, { checked: st.checked + c, defects: st.defects + d });
+    if (!onFloor(r.stage)) continue;
+
+    checked += c;
+    defects += d;
 
     const key = r.line_no != null ? String(r.line_no) : (r.line_label ?? '—');
     const ln = lineMap.get(key)
@@ -611,10 +676,19 @@ export async function fetchQualityOverview(): Promise<QualityOverview> {
   // Defect rows follow the same roll-up rule, but the monthly summaries record
   // everything at factory level -- excluding those would leave nothing at all.
   const defRows = (defData ?? []) as { category: string; qty: number; is_factory: boolean }[];
-  const perLine = defRows.filter((d) => !d.is_factory);
-  const chosen = perLine.length > 0 ? perLine : defRows;
+  const gatedRows = defRows.some((d) => defectStage(d.category) != null)
+    ? defRows.filter((d) => {
+        const stage = defectStage(d.category);
+        return stage != null && DEFECT_STAGES.includes(stage);
+      })
+    : defRows;
+  const perLine = gatedRows.filter((d) => !d.is_factory);
+  const chosen = perLine.length > 0 ? perLine : gatedRows;
   const catMap = new Map<string, number>();
-  for (const d of chosen) catMap.set(d.category, (catMap.get(d.category) ?? 0) + (d.qty ?? 0));
+  for (const d of chosen) {
+    const name = defectCategory(d.category);
+    catMap.set(name, (catMap.get(name) ?? 0) + (d.qty ?? 0));
+  }
 
   const days = [...dayMap.keys()].sort();
 

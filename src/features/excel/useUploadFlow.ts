@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ColumnMapping, ScanResult } from '@/types/domain';
 import { friendlyError } from '@/lib/errors';
-import { parseWorkbook, validateRows, type ParsedWorkbook } from './parseWorkbook';
+import { parseWorkbook, validateRows, blockingFields, type ParsedWorkbook } from './parseWorkbook';
 import { hashFile } from './hash';
 import { missingRequired } from './columnDetection';
 import { importWorkbook, validateFile, type ImportResult, type DuplicateResult } from './importService';
@@ -116,7 +116,10 @@ export function useUploadFlow() {
         mappings: parsed.mappings, rows, warnings, errors
       };
 
+      // The user is sent to the Map step whenever the sheet is not fully
+      // understood, so a guess is confirmed before anything is written.
       const needsMapping =
+        blockingFields(parsed, parsed.mappings).length > 0 ||
         missingRequired(parsed.mappings).length > 0 ||
         parsed.mappings.some((m) => m.confidence === 'low');
 
@@ -129,17 +132,21 @@ export function useUploadFlow() {
     }
   }, []);
 
-  const setMapping = useCallback((excelHeader: string, field: ColumnMapping['field']) => {
+  // Addressed by position, not by header text: a banded sheet has repeated
+  // headers and a sheet with merged cells has several blank ones, and keying on
+  // the text moved every column that shared a name at once.
+  const setMapping = useCallback((index: number, field: ColumnMapping['field']) => {
     setState((s) => ({
       ...s,
-      mappings: s.mappings.map((m) =>
-        m.excelHeader === excelHeader ? { ...m, field, confidence: field ? 'high' : 'unmapped' } : m)
+      mappings: s.mappings.map((m, i) =>
+        i === index ? { ...m, field, confidence: field ? 'high' : 'unmapped' } : m)
     }));
   }, []);
 
   const confirmMapping = useCallback(() => {
     setState((s) => {
       if (!s.parsed) return s;
+      if (blockingFields(s.parsed, s.mappings).length > 0) return s;
       const { rows, warnings, errors } = validateRows(s.parsed, s.mappings);
       return {
         ...s, step: 'preview',
@@ -247,8 +254,10 @@ export function useUploadFlow() {
     }
   }, [state, profile, queryClient]);
 
+  const blocking = state.parsed ? blockingFields(state.parsed, state.mappings) : [];
+
   return {
-    state, selectFile, setMapping, confirmMapping,
+    state, blocking, selectFile, setMapping, confirmMapping,
     runImport, runQualityImport, runSheetImport, reset
   };
 }

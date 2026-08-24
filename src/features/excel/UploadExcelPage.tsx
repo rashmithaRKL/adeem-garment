@@ -33,7 +33,7 @@ const STEP_ALIAS: Record<string, string> = {
 
 export function UploadExcelPage() {
   const {
-    state, selectFile, setMapping, confirmMapping,
+    state, blocking, selectFile, setMapping, confirmMapping,
     runImport, runQualityImport, runSheetImport, reset
   } = useUploadFlow();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -156,22 +156,38 @@ export function UploadExcelPage() {
 
       {state.step === 'mapping' && (
         <Card title="Column mapping">
+          {state.parsed?.layoutNote && (
+            <p className="banner" style={{
+              background: 'var(--blue-50)', border: '1px solid var(--info-border)',
+              color: 'var(--text)', fontSize: 13, marginTop: 0
+            }}>
+              {state.parsed.layoutNote}
+            </p>
+          )}
           <p style={{ margin: '0 0 18px', color: 'var(--text-muted)', fontSize: 13 }}>
-            Confirm the columns flagged below. Recognised headers are mapped automatically.
+            Confirm the columns flagged below. Recognised headers are mapped automatically, and the
+            first value found in each column is shown so an unnamed one can still be identified.
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {state.mappings.map((m) => (
-              <div key={m.excelHeader} style={{
+            {state.mappings.map((m, i) => (
+              <div key={i} style={{
                 display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 30px minmax(0,1fr)',
                 alignItems: 'center', gap: 12, padding: '11px 13px', borderRadius: 9,
                 background: m.confidence === 'high' ? 'var(--surface)' : 'var(--amber-50)',
                 border: '1px solid ' + (m.confidence === 'high' ? 'var(--border-soft)' : 'var(--amber-200)')
               }}>
-                <span className="mono">{m.excelHeader}</span>
+                <span style={{ minWidth: 0 }}>
+                  <span className="mono" style={{ display: 'block' }}>{m.excelHeader}</span>
+                  {state.parsed?.samples[i] && (
+                    <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+                      e.g. {state.parsed.samples[i]}
+                    </span>
+                  )}
+                </span>
                 <span style={{ textAlign: 'center', color: 'var(--text-faint)' }}>→</span>
                 <select className="input" style={{ padding: '8px 10px', fontSize: 13 }}
                   value={m.field ?? ''}
-                  onChange={(e) => setMapping(m.excelHeader, (e.target.value || null) as MappableField | null)}>
+                  onChange={(e) => setMapping(i, (e.target.value || null) as MappableField | null)}>
                   <option value="">Not imported</option>
                   {(Object.keys(FIELD_LABELS) as MappableField[]).map((field) => (
                     <option key={field} value={field}>{FIELD_LABELS[field]}</option>
@@ -180,8 +196,17 @@ export function UploadExcelPage() {
               </div>
             ))}
           </div>
+          {blocking.length > 0 && (
+            <p className="banner banner--error" style={{ marginBottom: 0, marginTop: 16 }}>
+              Choose a column for {blocking.map((f) => FIELD_LABELS[f]).join(', ')} before continuing —
+              without {blocking.length > 1 ? 'them' : 'it'} no row can be imported.
+            </p>
+          )}
           <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
-            <button type="button" className="btn btn--primary" onClick={confirmMapping}>Confirm mapping</button>
+            <button type="button" className="btn btn--primary" onClick={confirmMapping}
+              disabled={blocking.length > 0}>
+              Confirm mapping
+            </button>
             <button type="button" className="btn btn--secondary" onClick={reset}>Cancel</button>
           </div>
         </Card>
@@ -189,6 +214,14 @@ export function UploadExcelPage() {
 
       {state.step === 'preview' && state.scan && (
         <>
+          {state.parsed?.layoutNote && (
+            <p className="banner" style={{
+              background: 'var(--blue-50)', border: '1px solid var(--info-border)',
+              color: 'var(--text)', fontSize: 13, marginTop: 0
+            }}>
+              {state.parsed.layoutNote}
+            </p>
+          )}
           <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', marginBottom: 16 }}>
             {([
               ['Sheets', state.scan.sheetCount, 'var(--text-muted)'],
@@ -214,8 +247,8 @@ export function UploadExcelPage() {
                   <tr><th>Row</th><th>Line</th><th>Order</th><th className="num">Target</th><th className="num">Produced</th><th className="num">Eff.</th></tr>
                 </thead>
                 <tbody>
-                  {state.scan.rows.slice(0, 8).map((r) => (
-                    <tr key={r.rowNumber}>
+                  {state.scan.rows.slice(0, 8).map((r, i) => (
+                    <tr key={r.rowNumber + '-' + i}>
                       <td style={{ color: 'var(--text-faint)' }}>{r.rowNumber}</td>
                       <td style={{ fontWeight: 600 }}>{r.lineNumber}</td>
                       <td>{r.orderNumber}</td>

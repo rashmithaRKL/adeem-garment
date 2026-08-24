@@ -1,67 +1,81 @@
 import * as XLSX from 'xlsx';
 import type { ColumnMapping, ImportRow, MappableField, RowIssue } from '@/types/domain';
-import { detectColumns } from './columnDetection';
+import { detectColumns, mappedFields } from './columnDetection';
+import {
+  analyseWorkbook, cellText, columnLetter, lineFromHeading, lineFromLabel, norm, type SheetLayout
+} from './layout';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
 
 export interface ParsedWorkbook {
   sheetCount: number;
+  /** Data rows across every sheet read. A banded sheet yields more records. */
   rowCount: number;
   columnCount: number;
   headerRowIndex: number;
+  /** One entry per logical column, blanks named "Column D". */
   headers: string[];
+  /** First value under each column, shown beside the header while mapping. */
+  samples: string[];
   mappings: ColumnMapping[];
-  dataRows: unknown[][];
-}
-
-/**
- * sheet_to_json leaves a hole - not a value - wherever a cell is empty or has been
- * swallowed by a merge, and real production sheets are full of both. JavaScript's
- * array methods then disagree about those holes: map, forEach, some and filter skip
- * them, but findIndex visits every index and hands the callback `undefined`. That
- * mismatch crashed the scan, because a sparse header row produced a sparse mapping
- * array and validateRows' findIndex then read `.field` off a hole.
- *
- * Densifying once, here, is what keeps every downstream call site honest.
- */
-const densify = (row: unknown[]): unknown[] =>
-  Array.from({ length: row.length }, (_, i) => row[i] ?? null);
-
-/**
- * Production sheets rarely start on row 1 - there is usually a title block.
- * The header row is the first row where at least three cells are non-empty text.
- */
-function findHeaderRow(rows: unknown[][]): number {
-  for (let i = 0; i < Math.min(rows.length, 20); i += 1) {
-    const cells = (rows[i] ?? []).filter((c) => typeof c === 'string' && c.trim().length > 0);
-    if (cells.length >= 3) return i;
-  }
-  return 0;
+  layouts: SheetLayout[];
+  sheetsUsed: string[];
+  sheetsSkipped: string[];
+  /** Plain-language summary of the layout the scan settled on. */
+  layoutNote: string;
 }
 
 export async function parseWorkbook(file: File): Promise<ParsedWorkbook> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) throw new Error('The workbook contains no sheets.');
+  if (workbook.SheetNames.length === 0) throw new Error('The workbook contains no sheets.');
 
-  const sheet = workbook.Sheets[sheetName]!;
-  const rows = XLSX.utils
-    .sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false })
-    .map(densify);
+  const { sheetCount, layouts, skipped } = analyseWorkbook(workbook);
+  const best = layouts[0];
+  if (!best) throw new Error('None of the sheets in this workbook contain any data.');
 
-  const headerRowIndex = findHeaderRow(rows);
-  const headers = (rows[headerRowIndex] ?? []).map((h) => String(h ?? '').trim());
-  const dataRows = rows.slice(headerRowIndex + 1).filter((r) => r.some((c) => c !== '' && c != null));
+  const rowCount = layouts.reduce((total, l) => total + l.rows.length, 0);
+  const detected = detectColumns(best.headers);
+  const mappings: ColumnMapping[] = detected.map((m, i) => ({
+    ...m,
+    excelHeader: best.displayHeaders[i] ?? 'Column ' + columnLetter(i)
+  }));
 
   return {
-    sheetCount: workbook.SheetNames.length,
-    rowCount: dataRows.length,
-    columnCount: headers.length,
-    headerRowIndex,
-    headers,
-    mappings: detectColumns(headers),
-    dataRows
+    sheetCount,
+    rowCount,
+    columnCount: best.width,
+    headerRowIndex: best.headerRowIndex,
+    headers: best.displayHeaders,
+    samples: best.samples,
+    mappings,
+    layouts,
+    sheetsUsed: layouts.map((l) => l.sheet),
+    sheetsSkipped: skipped,
+    layoutNote: describeLayout(layouts, skipped)
   };
+}
+
+function describeLayout(layouts: SheetLayout[], skipped: string[]): string {
+  const best = layouts[0];
+  if (!best) return '';
+
+  const parts: string[] = [];
+  parts.push(layouts.length > 1
+    ? layouts.length + ' sheets read (' + layouts.map((l) => l.sheet).join(', ') + ')'
+    : 'Sheet "' + best.sheet + '"');
+  parts.push('headers on row ' + (best.headerRowIndex + 1));
+
+  const labelled = best.bands.filter((b) => b.label);
+  if (labelled.length > 1) {
+    parts.push(labelled.length + ' side-by-side blocks (' +
+      labelled.map((b) => b.label).join(', ') + ') read as separate records');
+  }
+
+  const dataRows = layouts.reduce((n, l) => n + l.rows.length, 0);
+  parts.push(dataRows + ' data row' + (dataRows === 1 ? '' : 's'));
+  if (skipped.length > 0) parts.push('skipped: ' + skipped.join(', '));
+
+  return parts.join(' · ');
 }
 
 const toInt = (v: unknown): number | null => {
@@ -71,6 +85,9 @@ const toInt = (v: unknown): number | null => {
   const n = Number(text);
   return Number.isFinite(n) ? Math.round(n) : null;
 };
+
+/** A line cell may hold a number, "L3" or "Line 03" depending on who typed it. */
+const toLine = (v: unknown): number | null => toInt(v) ?? lineFromLabel(cellText(v));
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -99,7 +116,7 @@ const toText = (v: unknown): string | null => {
  * which would read 45000 as the year 45000.
  */
 const toIsoDateOrNull = (v: unknown): string | null => {
-  if (v instanceof Date) return localDay(v);
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : localDay(v);
   if (typeof v === 'number' && Number.isFinite(v)) {
     // Excel serial: days since 1899-12-30, already calendar-absolute.
     if (v < 1 || v > 100_000) return null;
@@ -107,6 +124,14 @@ const toIsoDateOrNull = (v: unknown): string | null => {
   }
   const text = String(v ?? '').trim();
   if (!text) return null;
+  // Day-first is the local convention: Date.parse reads 03/08/2026 as 3 August
+  // in some engines and 8 March in others.
+  const dmy = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/.exec(text);
+  if (dmy) {
+    const year = Number(dmy[3]!.length === 2 ? '20' + dmy[3] : dmy[3]);
+    const date = new Date(year, Number(dmy[2]) - 1, Number(dmy[1]));
+    return Number.isNaN(date.getTime()) ? null : localDay(date);
+  }
   const d = new Date(text);
   return Number.isNaN(d.getTime()) ? null : localDay(d);
 };
@@ -118,16 +143,55 @@ function localDay(d: Date): string {
 
 const today = (): string => localDay(new Date());
 
+/**
+ * A daily sheet usually has no date column - the date is written once in the
+ * title block. Reading it there files the sheet under the day it covers instead
+ * of under whatever day it happened to be uploaded.
+ */
+function dateFromTitle(cells: unknown[]): string | null {
+  for (const cell of cells) {
+    if (cell instanceof Date) return toIsoDateOrNull(cell);
+    const text = cellText(cell);
+    if (!text) continue;
+    const match = /\d{1,4}[/\-.]\d{1,2}[/\-.]\d{2,4}/.exec(text);
+    const iso = match ? toIsoDateOrNull(match[0]) : null;
+    if (iso) return iso;
+  }
+  return null;
+}
+
+const TOTAL_ROW = /^(?:grand)?(?:total|totals|subtotal|sum|average|avg)\b/;
+
 export interface ValidationResult {
   rows: ImportRow[];
   warnings: RowIssue[];
   errors: (RowIssue & { type: string })[];
 }
 
+/**
+ * Fields the import genuinely cannot run without. Target is not among them - a
+ * sheet that records output but not a plan still imports, with a target of 0 -
+ * and the line may come from a band heading or a tab name instead of a column.
+ */
+export function blockingFields(parsed: ParsedWorkbook, mappings: ColumnMapping[]): MappableField[] {
+  const mapped = mappedFields(mappings);
+  const missing: MappableField[] = [];
+  if (!mapped.has('orderNumber')) missing.push('orderNumber');
+  if (!mapped.has('actualQuantity')) missing.push('actualQuantity');
+
+  // The line can come from the tab name, a band heading over each block, or a
+  // "Line 03" heading row between the records, so a sheet without a line column
+  // is only blocked when none of those is present.
+  const lineComesFromLayout = parsed.layouts.every((l) =>
+    l.sheetLineNumber != null || l.hasSectionLines || l.bands.every((b) => b.lineNumber != null));
+  if (!mapped.has('lineNumber') && !lineComesFromLayout) missing.push('lineNumber');
+
+  return missing;
+}
+
 /** Rows with errors are reported and skipped - never silently dropped. */
 export function validateRows(parsed: ParsedWorkbook, mappings: ColumnMapping[]): ValidationResult {
-  const indexOf = (field: MappableField): number =>
-    mappings.findIndex((m) => m.field === field);
+  const indexOf = (field: MappableField): number => mappings.findIndex((m) => m.field === field);
 
   const cols = {
     line: indexOf('lineNumber'),
@@ -145,81 +209,145 @@ export function validateRows(parsed: ParsedWorkbook, mappings: ColumnMapping[]):
     deliveryDate: indexOf('deliveryDate')
   };
 
-  // A sheet without a date column is the day's sheet: file it under today, once,
-  // rather than under whatever partial date each row happens to contain.
-  const fallbackDate = today();
-
   const rows: ImportRow[] = [];
   const warnings: RowIssue[] = [];
   const errors: (RowIssue & { type: string })[] = [];
 
-  parsed.dataRows.forEach((raw, i) => {
-    const rowNumber = parsed.headerRowIndex + 2 + i;
-    const cell = (idx: number): unknown => (idx >= 0 ? raw[idx] : undefined);
-
-    const lineNumber = toInt(cell(cols.line));
-    const orderNumber = String(cell(cols.order) ?? '').trim();
-    const target = toInt(cell(cols.target)) ?? 0;
-    const actual = toInt(cell(cols.actual));
-
-    if (!orderNumber) {
-      errors.push({ rowNumber, column: 'Order No', type: 'missing_required',
-        message: 'Order number is blank - the row cannot be linked to an order.' });
-      return;
+  const blocking = blockingFields(parsed, mappings);
+  if (blocking.length > 0) {
+    for (const field of blocking) {
+      errors.push({
+        rowNumber: 0, column: FIELD_NAME[field], type: 'unmapped_column',
+        message: 'No column is mapped to ' + FIELD_NAME[field] +
+          ' - open the Map step and choose which column holds it.'
+      });
     }
-    if (lineNumber == null) {
-      errors.push({ rowNumber, column: 'Line No', type: 'invalid_line',
-        message: 'Line number is missing or not a number.' });
-      return;
-    }
-    if (actual == null) {
-      errors.push({ rowNumber, column: 'Prod Qty', type: 'invalid_number',
-        message: 'Produced quantity "' + String(cell(cols.actual) ?? '') + '" is not a number.' });
-      return;
-    }
+    return { rows, warnings, errors };
+  }
 
-    const efficiency = cols.efficiency >= 0
-      ? toPercent(cell(cols.efficiency))
-      : target > 0 ? round2((actual / target) * 100) : null;
+  if (cols.target < 0) {
+    warnings.push({ rowNumber: 0, column: 'Target',
+      message: 'No target column was found, so every record is imported with a target of 0.' });
+  }
 
-    if (efficiency != null && efficiency < EFFICIENCY_THRESHOLD) {
-      warnings.push({ rowNumber, column: 'Eff %',
-        message: 'Efficiency ' + efficiency + '% is below the ' + EFFICIENCY_THRESHOLD + '% threshold.' });
-    }
-    if (target > 0 && actual > target * 1.02) {
-      warnings.push({ rowNumber, column: 'Prod Qty',
-        message: 'Produced quantity exceeds target - verify the count.' });
-    }
+  const multiSheet = parsed.layouts.length > 1;
 
-    const productionDate = toIsoDateOrNull(cell(cols.date));
-    if (cols.date >= 0 && productionDate == null && cell(cols.date) != null) {
-      warnings.push({ rowNumber, column: 'Date',
-        message: 'Production date could not be read; the row was filed under today.' });
-    }
+  for (const layout of parsed.layouts) {
+    // A sheet without a date column is one day's sheet: file it under the date
+    // written in its title block, and only under today when there is none.
+    const fallbackDate = dateFromTitle(layout.titleCells) ?? today();
+    let sectionLine: number | null = null;
 
-    const record: Record<string, unknown> = {};
-    parsed.headers.forEach((h, idx) => { record[h] = raw[idx] ?? null; });
+    layout.rows.forEach((raw, i) => {
+      const rowNumber = layout.rowNumbers[i] ?? i + 1;
+      const filled = raw.map(cellText).filter(Boolean);
+      const distinct = new Set(filled);
 
-    rows.push({
-      rowNumber,
-      lineNumber,
-      orderNumber,
-      productionDate: productionDate ?? fallbackDate,
-      targetQuantity: target,
-      actualQuantity: actual,
-      efficiency,
-      order: {
-        buyer: toText(cell(cols.buyer)),
-        styleNumber: toText(cell(cols.style)),
-        productName: toText(cell(cols.product)),
-        color: toText(cell(cols.color)),
-        size: toText(cell(cols.size)),
-        orderQuantity: toInt(cell(cols.orderQuantity)),
-        deliveryDate: toIsoDateOrNull(cell(cols.deliveryDate))
-      },
-      raw: record
+      // "Line 03" alone on a row is a section heading, and the rows beneath it
+      // belong to that line. A merged heading fills its whole row, so one
+      // repeated value counts as alone.
+      if (distinct.size === 1) {
+        const heading = lineFromHeading(filled[0] ?? '');
+        if (heading != null) {
+          sectionLine = heading;
+          return;
+        }
+      }
+      if (TOTAL_ROW.test(norm(filled[0] ?? ''))) return;
+
+      for (const band of layout.bands) {
+        const cell = (logical: number): unknown => {
+          if (logical < 0) return undefined;
+          const column = band.columns[logical];
+          return column == null || column < 0 ? undefined : raw[column];
+        };
+        const where = (multiSheet ? layout.sheet + ' ' : '') + (band.label ? band.label + ' ' : '');
+
+        // A block with nothing in it is a line that did not run, not an error.
+        const anyValue = [cols.line, cols.order, cols.target, cols.actual, cols.efficiency]
+          .some((c) => cellText(cell(c)).length > 0);
+        if (!anyValue) continue;
+
+        // Stacked sheets repeat their header row between blocks; that row is not
+        // a record, and reporting it as a broken one only confuses the operator.
+        const orderCell = norm(cell(cols.order));
+        if (orderCell.length > 0 && orderCell === norm(mappings[cols.order]?.excelHeader)) continue;
+
+        const lineNumber = toLine(cell(cols.line)) ?? band.lineNumber ?? sectionLine ?? layout.sheetLineNumber;
+        const orderNumber = String(cell(cols.order) ?? '').trim();
+        const target = toInt(cell(cols.target)) ?? 0;
+        const actual = toInt(cell(cols.actual));
+
+        if (!orderNumber) {
+          errors.push({ rowNumber, column: 'Order No', type: 'missing_required',
+            message: where + 'order number is blank - the row cannot be linked to an order.' });
+          continue;
+        }
+        if (lineNumber == null) {
+          errors.push({ rowNumber, column: 'Line No', type: 'invalid_line',
+            message: where + 'line number is missing or not a number.' });
+          continue;
+        }
+        if (actual == null) {
+          errors.push({ rowNumber, column: 'Prod Qty', type: 'invalid_number',
+            message: where + 'produced quantity "' + cellText(cell(cols.actual)) + '" is not a number.' });
+          continue;
+        }
+
+        const efficiency = cols.efficiency >= 0
+          ? toPercent(cell(cols.efficiency))
+          : target > 0 ? round2((actual / target) * 100) : null;
+
+        if (efficiency != null && efficiency < EFFICIENCY_THRESHOLD) {
+          warnings.push({ rowNumber, column: 'Eff %',
+            message: where + 'efficiency ' + efficiency + '% is below the ' + EFFICIENCY_THRESHOLD + '% threshold.' });
+        }
+        if (target > 0 && actual > target * 1.02) {
+          warnings.push({ rowNumber, column: 'Prod Qty',
+            message: where + 'produced quantity exceeds target - verify the count.' });
+        }
+
+        const productionDate = toIsoDateOrNull(cell(cols.date));
+        if (cols.date >= 0 && productionDate == null && cellText(cell(cols.date)).length > 0) {
+          warnings.push({ rowNumber, column: 'Date',
+            message: where + 'production date could not be read; the row was filed under ' + fallbackDate + '.' });
+        }
+
+        const record: Record<string, unknown> = {};
+        parsed.headers.forEach((header, j) => { record[header] = cell(j) ?? null; });
+        if (band.label) record['Block'] = band.label;
+        if (multiSheet) record['Sheet'] = layout.sheet;
+
+        rows.push({
+          rowNumber,
+          lineNumber,
+          orderNumber,
+          productionDate: productionDate ?? fallbackDate,
+          targetQuantity: target,
+          actualQuantity: actual,
+          efficiency,
+          order: {
+            buyer: toText(cell(cols.buyer)),
+            styleNumber: toText(cell(cols.style)),
+            productName: toText(cell(cols.product)),
+            color: toText(cell(cols.color)),
+            size: toText(cell(cols.size)),
+            orderQuantity: toInt(cell(cols.orderQuantity)),
+            deliveryDate: toIsoDateOrNull(cell(cols.deliveryDate))
+          },
+          raw: record
+        });
+      }
     });
-  });
+  }
 
   return { rows, warnings, errors };
 }
+
+const FIELD_NAME: Record<MappableField, string> = {
+  lineNumber: 'Production line', orderNumber: 'Order number', buyer: 'Buyer',
+  styleNumber: 'Style number', productName: 'Product name', color: 'Colour', size: 'Size',
+  orderQuantity: 'Order quantity', targetQuantity: 'Target quantity',
+  actualQuantity: 'Produced quantity', efficiency: 'Efficiency',
+  productionDate: 'Production date', deliveryDate: 'Delivery date', remarks: 'Remarks'
+};

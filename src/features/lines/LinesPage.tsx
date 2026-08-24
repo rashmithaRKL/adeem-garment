@@ -9,7 +9,12 @@ import { formatNumber, formatPercent, formatDate } from '@/lib/format';
 import { friendlyError } from '@/lib/errors';
 import { fetchLinePerformance } from '@/features/dashboard/queries';
 import { useRealtimeDashboard } from '@/features/dashboard/useRealtimeDashboard';
-import { fetchQualityByLine } from '@/features/quality/queries';
+import {
+  fetchQualityRecords, buildQualityMatrix, FLOOR_STAGES,
+  type QualityBasis, type QualityRecords
+} from '@/features/quality/queries';
+import { QualityPeriodPicker, periodLabel } from '@/features/quality/QualityPeriodPicker';
+import { STAGE_LABEL } from '@/features/quality/types';
 import { fetchNextStyles } from '@/features/loading/queries';
 import { useIsManager } from '@/features/auth/AuthProvider';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
@@ -23,6 +28,16 @@ const BLANK: LineEdit = {
   line_number: 1, line_name: '', department: 'Sewing', status: 'idle', active: true
 };
 
+/** Steady identity while the records query is in flight, so the builder is stable. */
+const NO_QUALITY: QualityRecords = { inspections: [], defects: [], lines: [], finals: [] };
+
+/** Written the way the client says it: "In line + End line + Appearance". */
+const floorNote = FLOOR_STAGES.map((s) => STAGE_LABEL[s]).join(' + ');
+
+/** Pass rate over the floor gates, read off the same two figures shown beside it. */
+const passOf = (q: { checked: number; defects: number }): number =>
+  Math.round(((q.checked - q.defects) / q.checked) * 10_000) / 100;
+
 export function LinesPage() {
   useRealtimeDashboard();
   const queryClient = useQueryClient();
@@ -30,14 +45,26 @@ export function LinesPage() {
 
   const perf = useQuery({ queryKey: ['dashboard', 'lines'], queryFn: () => fetchLinePerformance() });
   const all = useQuery({ queryKey: ['lines', 'all'], queryFn: fetchAllLines });
-  const quality = useQuery({ queryKey: ['quality', 'byLine'], queryFn: fetchQualityByLine });
+  // The same rows, the same builder and the same cache entry the Quality
+  // Management screen uses, so a line's pass rate reads the same on both screens
+  // for the same day or month rather than being an all-time figure here.
+  const quality = useQuery({ queryKey: ['quality', 'records'], queryFn: fetchQualityRecords });
   // What each line takes on after the style it is running now. The current order
   // comes from the order book; what follows it is a plan, and lives there.
   const nextStyles = useQuery({ queryKey: ['loadingPlan', 'next'], queryFn: fetchNextStyles });
 
   const [term, setTerm] = useSearchTerm();
+  const [basis, setBasis] = useState<QualityBasis>('daily');
+  const [period, setPeriod] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ row: LineRow | null } | null>(null);
   const [removing, setRemoving] = useState<LineRow | null>(null);
+
+  const records = quality.data ?? NO_QUALITY;
+  const matrix = buildQualityMatrix(records, basis, period, EFFICIENCY_THRESHOLD);
+  const hasQuality = records.inspections.length > 0 || records.defects.length > 0;
+  const qualityByLine = new Map(
+    matrix.lines.filter((l) => l.lineNo != null).map((l) => [l.lineNo!, l])
+  );
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['lines'] });
@@ -82,6 +109,24 @@ export function LinesPage() {
         </div>
       )}
 
+      {/* The picker governs the Quality panel on each card and nothing else on
+          this screen — output against target comes from production records, which
+          have their own dates — so it is captioned rather than left to be guessed. */}
+      {/* Hidden until a quality report has been imported at all — otherwise the
+          control's only option reads "No periods yet". It stays on screen once
+          there is data even if this basis has none, because switching basis is
+          exactly how a factory that files only monthly reports finds its figures. */}
+      {hasQuality && (
+        <QualityPeriodPicker
+          basis={basis}
+          period={matrix.period}
+          periods={matrix.periods}
+          onBasis={setBasis}
+          onPeriod={setPeriod}
+          note={<>Quality figures on each card only. Checked and defects are {floorNote}.</>}
+        />
+      )}
+
       {remove.error && <p className="banner banner--error">{friendlyError(remove.error)}</p>}
 
       <QueryState isLoading={all.isLoading} error={all.error} isEmpty={rows.length === 0}
@@ -92,7 +137,7 @@ export function LinesPage() {
       <div className="grid grid--cards">
         {shown.map((row, i) => {
           const line = perfById.get(row.id);
-          const q = quality.data?.[row.line_number];
+          const q = qualityByLine.get(row.line_number);
           const next = nextStyles.data?.[row.line_number];
           return (
           <LineCard key={row.id} index={i}>
@@ -176,13 +221,13 @@ export function LinesPage() {
               <div style={{ fontSize: 11, color: 'var(--text-faint)', letterSpacing: '.08em', textTransform: 'uppercase', marginBottom: 8 }}>
                 Quality
               </div>
-              {q ? (
+              {q && q.checked > 0 ? (
                 <>
                   <div className="grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', textAlign: 'center', gap: 10 }}>
                     <div>
                       <div style={{ font: '600 18px/1 var(--font-heading)',
-                        color: q.passPct != null && q.passPct < EFFICIENCY_THRESHOLD ? 'var(--red-500)' : 'var(--blue-500)' }}>
-                        {q.passPct != null ? q.passPct.toFixed(1) + '%' : '—'}
+                        color: passOf(q) < EFFICIENCY_THRESHOLD ? 'var(--red-500)' : 'var(--blue-500)' }}>
+                        {passOf(q).toFixed(1)}%
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Pass rate</div>
                     </div>
@@ -196,13 +241,18 @@ export function LinesPage() {
                     </div>
                   </div>
                   <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--text-faint)' }}>
-                    {q.stages} inspection stage{q.stages === 1 ? '' : 's'}
-                    {q.lastSeen ? ' · latest ' + q.lastSeen : ''}
+                    {floorNote} · {matrix.period
+                      ? periodLabel(matrix.period, basis)
+                      : `all ${matrix.periods.length} ${basis === 'daily' ? 'days' : 'months'}`}
                   </p>
                 </>
               ) : (
                 <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
-                  No inspection data imported for this line yet.
+                  {matrix.periods.length === 0
+                    ? 'No inspection data imported for this line yet.'
+                    : `Not inspected ${matrix.period
+                        ? 'on ' + periodLabel(matrix.period, basis)
+                        : 'in any ' + (basis === 'daily' ? 'daily' : 'monthly') + ' report'}.`}
                 </p>
               )}
             </div>

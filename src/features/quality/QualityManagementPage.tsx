@@ -4,14 +4,23 @@ import { Card } from '@/components/Card';
 import { Kpi } from '@/components/Kpi';
 import { QueryState } from '@/components/QueryState';
 import { Donut, BarChart, LineChart, seriesColor } from '@/components/charts';
-import { formatNumber, formatDate } from '@/lib/format';
+import { formatNumber } from '@/lib/format';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
 import { useAuth } from '@/features/auth/AuthProvider';
 import {
-  fetchQualityRecords, buildQualityMatrix,
+  fetchQualityRecords, buildQualityMatrix, FLOOR_STAGES, DEFECT_STAGES,
   type QualityBasis, type FinalStatus, type LineQualityRow, type QualityMatrix, type StageStat
 } from './queries';
+import { QualityPeriodPicker, periodLabel } from './QualityPeriodPicker';
 import { STAGE_LABEL, type QualityStage } from './types';
+
+/** "In line, End line and Appearance" — the phrase every caption below needs. */
+const stageList = (stages: QualityStage[]): string => {
+  const names = stages.map((s) => STAGE_LABEL[s]);
+  return names.length < 2
+    ? names.join('')
+    : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+};
 
 /**
  * The gates the client asked to see line by line, in floor order. Final is not
@@ -49,11 +58,6 @@ const FINAL_COLOR: Record<FinalStatus, string> = {
 
 const pctText = (n: number | null): string => (n == null ? '—' : n.toFixed(1) + '%');
 
-const periodLabel = (period: string, basis: QualityBasis): string =>
-  basis === 'daily'
-    ? formatDate(period)
-    : new Date(period).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-
 /** Short enough for an axis: "12 Aug" daily, "Aug 26" monthly. */
 const shortPeriod = (period: string, basis: QualityBasis): string =>
   new Date(period).toLocaleDateString('en-GB',
@@ -87,6 +91,9 @@ export function QualityManagementPage() {
   // matrix.stages is ordered by volume for the charts; the tiles want it by name.
   const byStage = new Map(matrix.stages.map((s) => [s.stage, s]));
 
+  /** Short enough for a tile's sub-line, and written the way the client says it. */
+  const floorNote = FLOOR_STAGES.map((s) => STAGE_LABEL[s]).join(' + ');
+
   const stageSeries = CHART_STAGES.map((stage, i) => ({
     key: stage, label: STAGE_LABEL[stage], color: seriesColor(i)
   }));
@@ -97,45 +104,17 @@ export function QualityManagementPage() {
 
   return (
     <>
-      <div style={{
-        display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16
-      }}>
-        <div className="segmented" role="group" aria-label="Reporting basis">
-          {(['daily', 'monthly'] as QualityBasis[]).map((b) => (
-            <button
-              key={b}
-              type="button"
-              className={'segmented__btn' + (basis === b ? ' segmented__btn--on' : '')}
-              aria-pressed={basis === b}
-              onClick={() => { setBasis(b); setPeriod(null); }}
-            >
-              {b === 'daily' ? 'Daily' : 'Monthly'}
-            </button>
-          ))}
-        </div>
-
-        <select
-          className="input"
-          style={{ padding: '8px 10px', fontSize: 13, flex: '0 1 240px' }}
-          aria-label="Period"
-          value={matrix.period ?? ''}
-          onChange={(e) => setPeriod(e.target.value === '' ? null : e.target.value)}
-        >
-          <option value="">
-            {matrix.periods.length > 0
-              ? `All ${matrix.periods.length} ${basis === 'daily' ? 'days' : 'months'}`
-              : 'No periods yet'}
-          </option>
-          {matrix.periods.map((p) => (
-            <option key={p} value={p}>{periodLabel(p, basis)}</option>
-          ))}
-        </select>
-
-        <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+      <QualityPeriodPicker
+        basis={basis}
+        period={matrix.period}
+        periods={matrix.periods}
+        onBasis={setBasis}
+        onPeriod={setPeriod}
+        note={<>
           Pass{showRejection && ', rejection'} and final inspection are judged against
           the {EFFICIENCY_THRESHOLD}% threshold.
-        </span>
-      </div>
+        </>}
+      />
 
       <QueryState
         isLoading={records.isLoading}
@@ -151,26 +130,43 @@ export function QualityManagementPage() {
         }
       >
         <div className="grid grid--kpi">
+          {/* Checked, defects, pass and rejection are all one figure read four
+              ways, and all four are the three floor gates added together. The
+              sub-lines say so on the tiles themselves rather than in a footnote
+              nobody reaches. */}
           <Kpi index={0} label="Pieces checked" icon="🔎" tone="blue"
             value={formatNumber(matrix.checked)}
-            sub={matrix.period ? periodLabel(matrix.period, basis) : `${matrix.periods.length} periods`} />
+            sub={floorNote} />
           <Kpi index={1} label="Pass rate" icon="✅"
             tone={(matrix.passPct ?? 0) >= EFFICIENCY_THRESHOLD ? 'green' : 'red'}
             value={pctText(matrix.passPct)}
-            sub={'target ' + EFFICIENCY_THRESHOLD + '%'} />
-          <Kpi index={2} label="AQL audit" icon="📐" tone="purple"
+            sub={'target ' + EFFICIENCY_THRESHOLD + '% · ' + floorNote} />
+          <Kpi index={2} label="Defects found" icon="🧷" tone="orange"
+            value={formatNumber(matrix.defects)}
+            sub={floorNote} />
+          <Kpi index={3} label="AQL audit" icon="📐" tone="purple"
             value={pctText(matrix.aqlPassPct)}
-            sub={matrix.aqlPassPct == null ? 'no AQL rows in this report' : 'sampled pass rate'} />
+            sub={matrix.aqlPassPct == null
+              ? 'no AQL rows in this report'
+              : 'sampled pass rate, counted separately'} />
           {TILE_STAGES.map(({ stage, icon }, i) => (
-            <StageKpi key={stage} stage={stage} icon={icon} index={3 + i}
+            <StageKpi key={stage} stage={stage} icon={icon} index={4 + i}
               stat={byStage.get(stage)} />
           ))}
           {showRejection && (
-            <Kpi index={7} label="Rejection" icon="🚫" tone="orange"
+            <Kpi index={8} label="Rejection" icon="🚫" tone="orange"
               value={pctText(matrix.rejectionPct)}
-              sub={formatNumber(matrix.defects) + ' defects found'} />
+              sub={formatNumber(matrix.defects) + ' defects · ' + floorNote} />
           )}
         </div>
+
+        <p style={{ margin: '12px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+          Pieces checked and defects are {stageList(FLOOR_STAGES)} added together, for{' '}
+          {matrix.period ? periodLabel(matrix.period, basis) : `all ${matrix.periods.length} ${basis === 'daily' ? 'days' : 'months'}`}.
+          Final inspection and the AQL audit sample goods already counted at those gates, so they
+          keep their own tiles and are never added in — counting them twice would drag the pass
+          rate towards whatever the sample said.
+        </p>
 
         <Card title="Pass rate by line and stage" style={{ marginTop: 16 }}
           aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
@@ -214,15 +210,30 @@ export function QualityManagementPage() {
             />
           </Card>
 
-          <Card title="Top 5 defects">
+          <Card title="Top 5 defects"
+            aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+              {matrix.defectsGated ? stageList(DEFECT_STAGES) : 'every gate the report names'}
+            </span>}>
             <Donut
               size={158}
               centerLabel="defects"
               slices={matrix.topDefects.map((d, i) => ({
                 label: d.category, value: d.qty, color: seriesColor(i)
               }))}
-              empty="No defect categories recorded in this period."
+              empty={basis === 'daily'
+                ? 'No defect categories were recorded on this day.'
+                : 'No defect categories were recorded in this month.'}
             />
+            <p style={{ margin: '12px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+              {matrix.defectsGated
+                ? `Counted at ${stageList(DEFECT_STAGES).toLowerCase()} — the two gates that judge `
+                  + 'finished work. In line is a running check on pieces still being sewn, so its '
+                  + 'counts are rework rather than defects leaving the line, and are left out here.'
+                : 'The reports imported for this period do not say which gate each category was '
+                  + 'counted at, so every category they carry is shown.'}
+              {' '}Shown {basis === 'daily' ? 'daily' : 'monthly'}
+              {matrix.period ? ' for ' + periodLabel(matrix.period, basis) : ', across every period'}.
+            </p>
           </Card>
         </div>
 
@@ -266,6 +277,8 @@ export function QualityManagementPage() {
             </table>
           </div>
           <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+            Checked and Defects are the {stageList(FLOOR_STAGES).toLowerCase()} columns beside them
+            added together; the AQL column is a sampled audit and is not part of that sum.{' '}
             {showRejection && 'Rejection is defects found for every hundred pieces checked. '}
             Final inspection is
             the pass rate of the final gate on its own, so a line can clear every earlier stage
