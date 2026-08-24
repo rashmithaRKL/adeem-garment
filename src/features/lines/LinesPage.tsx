@@ -10,10 +10,11 @@ import { friendlyError } from '@/lib/errors';
 import { fetchLinePerformance } from '@/features/dashboard/queries';
 import { useRealtimeDashboard } from '@/features/dashboard/useRealtimeDashboard';
 import {
-  fetchQualityRecords, buildQualityMatrix, FLOOR_STAGES,
-  type QualityBasis, type QualityRecords
+  fetchQualityRecords, buildQualityMatrix, datasetGrain, earliestDate, latestDate, openingDate,
+  FLOOR_STAGES, type QualityRecords
 } from '@/features/quality/queries';
-import { QualityPeriodPicker, periodLabel } from '@/features/quality/QualityPeriodPicker';
+import { spanFor, spanLabel, today, type QualityRange } from '@/features/quality/period';
+import { QualityPeriodPicker } from '@/features/quality/QualityPeriodPicker';
 import { STAGE_LABEL } from '@/features/quality/types';
 import { fetchNextStyles } from '@/features/loading/queries';
 import { useIsManager } from '@/features/auth/AuthProvider';
@@ -54,13 +55,21 @@ export function LinesPage() {
   const nextStyles = useQuery({ queryKey: ['loadingPlan', 'next'], queryFn: fetchNextStyles });
 
   const [term, setTerm] = useSearchTerm();
-  const [basis, setBasis] = useState<QualityBasis>('daily');
-  const [period, setPeriod] = useState<string | null>(null);
+  // null on both means "follow the reports" — see the Quality Management screen,
+  // which opens the same way so the two agree on what "now" is.
+  const [range, setRange] = useState<QualityRange | null>(null);
+  const [anchor, setAnchor] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ row: LineRow | null } | null>(null);
   const [removing, setRemoving] = useState<LineRow | null>(null);
 
   const records = quality.data ?? NO_QUALITY;
-  const matrix = buildQualityMatrix(records, basis, period, EFFICIENCY_THRESHOLD);
+  const latest = latestDate(records);
+  const earliest = earliestDate(records);
+  const span = spanFor(
+    range ?? (datasetGrain(records) === 'daily' ? 'day' : 'month'),
+    anchor ?? openingDate(records) ?? today()
+  );
+  const matrix = buildQualityMatrix(records, span, EFFICIENCY_THRESHOLD);
   const hasQuality = records.inspections.length > 0 || records.defects.length > 0;
   const qualityByLine = new Map(
     matrix.lines.filter((l) => l.lineNo != null).map((l) => [l.lineNo!, l])
@@ -112,17 +121,18 @@ export function LinesPage() {
       {/* The picker governs the Quality panel on each card and nothing else on
           this screen — output against target comes from production records, which
           have their own dates — so it is captioned rather than left to be guessed. */}
-      {/* Hidden until a quality report has been imported at all — otherwise the
-          control's only option reads "No periods yet". It stays on screen once
-          there is data even if this basis has none, because switching basis is
-          exactly how a factory that files only monthly reports finds its figures. */}
+      {/* Hidden until a quality report has been imported at all: with nothing to
+          look at, a date field and three range buttons are three ways of asking
+          the same empty question. It stays on screen once there is data even if
+          this window has none, because widening the window is exactly how the
+          figures are found. */}
       {hasQuality && (
         <QualityPeriodPicker
-          basis={basis}
-          period={matrix.period}
-          periods={matrix.periods}
-          onBasis={setBasis}
-          onPeriod={setPeriod}
+          span={span}
+          latest={latest}
+          earliest={earliest}
+          onRange={setRange}
+          onAnchor={setAnchor}
           note={<>Quality figures on each card only. Checked and defects are {floorNote}.</>}
         />
       )}
@@ -241,18 +251,14 @@ export function LinesPage() {
                     </div>
                   </div>
                   <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--text-faint)' }}>
-                    {floorNote} · {matrix.period
-                      ? periodLabel(matrix.period, basis)
-                      : `all ${matrix.periods.length} ${basis === 'daily' ? 'days' : 'months'}`}
+                    {floorNote} · {spanLabel(span)}
                   </p>
                 </>
               ) : (
                 <p style={{ margin: 0, fontSize: 12, color: 'var(--text-faint)' }}>
-                  {matrix.periods.length === 0
+                  {latest == null
                     ? 'No inspection data imported for this line yet.'
-                    : `Not inspected ${matrix.period
-                        ? 'on ' + periodLabel(matrix.period, basis)
-                        : 'in any ' + (basis === 'daily' ? 'daily' : 'monthly') + ' report'}.`}
+                    : 'Not inspected in ' + spanLabel(span) + '.'}
                 </p>
               )}
             </div>

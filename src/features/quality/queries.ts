@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/supabase';
+import { monthEnd, monthStart, today as todayISO, withinSpan } from './period';
+import type { QualitySpan } from './period';
 import { STAGE_LABEL } from './types';
 import type { QualityReportKind, QualityStage } from './types';
 
@@ -101,7 +103,13 @@ interface DefectRow {
 const reportable = (rows: InspectionRow[]): InspectionRow[] =>
   rows.filter((r) => r.stage in STAGE_LABEL);
 
-export type QualityBasis = 'daily' | 'monthly';
+/**
+ * The grain a figure was read at. Daily and monthly rows describe the same
+ * inspections twice over, so a window is answered from one grain or the other and
+ * never from both — summing a monthly summary with the days inside it counts every
+ * piece twice and halves the pass rate on screen.
+ */
+export type QualityGrain = 'daily' | 'monthly';
 
 /** A line the factory has, whether or not any report has measured it yet. */
 export interface QualityLineRef {
@@ -223,11 +231,18 @@ export interface LineQualityRow {
 
 export interface QualityMatrix {
   hasData: boolean;
-  basis: QualityBasis;
-  /** Every period available on this basis, newest first. */
-  periods: string[];
-  /** null means every period at once. */
-  period: string | null;
+  /** The window these figures cover. */
+  span: QualitySpan;
+  /** Which grain answered it — daily rows where they exist, monthly otherwise. */
+  grain: QualityGrain;
+  /**
+   * True when the reports hold monthly summaries the current window cannot reach,
+   * so an empty day or week can say where the figures actually are instead of
+   * reading as a factory that inspected nothing.
+   */
+  hasMonthlySummaries: boolean;
+  /** True when any daily report exists at all, anywhere in the history. */
+  hasDailyReports: boolean;
   checked: number;
   defects: number;
   passPct: number | null;
@@ -352,8 +367,165 @@ const unwrapParens = (text: string): string => {
   return text;
 };
 
-const periodOf = (r: { inspection_date: string | null; period_month: string | null }, basis: QualityBasis) =>
-  basis === 'daily' ? r.inspection_date : r.period_month;
+interface Dated { inspection_date: string | null; period_month: string | null; }
+
+const dailyIn = <T extends Dated>(rows: T[], span: QualitySpan): T[] =>
+  rows.filter((r) => r.inspection_date != null && withinSpan(r.inspection_date, span));
+
+/**
+ * Monthly rows are only reachable from a month-wide window. A summary covering
+ * August answers "August" honestly; charging its whole month against a Tuesday, or
+ * against a seven-day window that happens to contain the first of the month, would
+ * put a month of production behind one day's heading.
+ */
+const monthlyIn = <T extends Dated>(rows: T[], span: QualitySpan): T[] =>
+  span.range !== 'month'
+    ? []
+    : rows.filter((r) => r.inspection_date == null && r.period_month != null
+        && withinSpan(r.period_month, span));
+
+/** The date a row is plotted against, once the grain is settled. */
+const pointOf = (r: Dated, grain: QualityGrain): string =>
+  (grain === 'daily' ? r.inspection_date : r.period_month)!;
+
+/** Whether the history holds daily reports at all — not just inside some window. */
+export const hasDailyReports = (data: QualityRecords): boolean =>
+  data.inspections.some((r) => r.inspection_date != null);
+
+export const hasMonthlySummaries = (data: QualityRecords): boolean =>
+  data.inspections.some((r) => r.inspection_date == null && r.period_month != null);
+
+/** Daily where the factory files daily, monthly where it only files summaries. */
+export const datasetGrain = (data: QualityRecords): QualityGrain =>
+  hasDailyReports(data) ? 'daily' : 'monthly';
+
+/**
+ * The newest date the screen can open on: a factory that last filed on Friday
+ * wants Friday, not an empty Monday.
+ *
+ * It is read at the grain the screen will open at, because the two have to agree.
+ * A factory that files daily reports *and* a monthly summary has rows reaching the
+ * last of the month, but the screen opens Daily — anchoring it on the 31st shows
+ * an empty day for a month that is full of reports. So daily data is answered with
+ * the newest day that carries an inspection, and only a summary-only factory is
+ * answered with the end of its newest month.
+ */
+export function latestDate(data: QualityRecords): string | null {
+  let best: string | null = null;
+  const offer = (d: string | null) => { if (d != null && (best == null || d > best)) best = d; };
+
+  if (datasetGrain(data) === 'daily') {
+    for (const r of data.inspections) offer(r.inspection_date);
+    // Only if no inspection carries a day at all — a defect breakdown on its own
+    // is still something to show, and nothing else can date the screen.
+    if (best == null) for (const d of data.defects) offer(d.inspection_date);
+    return best;
+  }
+
+  for (const r of data.inspections) offer(r.period_month);
+  for (const d of data.defects) offer(d.period_month);
+  for (const f of data.finals) offer(f.period_month);
+  return best != null ? monthEnd(best) : null;
+}
+
+/** Days that carry something worth showing — a measured inspection or a defect. */
+function daysWithFigures(data: QualityRecords): Set<string> {
+  const days = new Set<string>();
+  for (const r of data.inspections) {
+    if (r.inspection_date != null && (r.checked_qty ?? 0) > 0) days.add(r.inspection_date);
+  }
+  for (const d of data.defects) {
+    if (d.inspection_date != null && (d.qty ?? 0) > 0) days.add(d.inspection_date);
+  }
+  return days;
+}
+
+/** Months that carry a summary, for a factory that files nothing daily. */
+function monthsWithFigures(data: QualityRecords): Set<string> {
+  const months = new Set<string>();
+  for (const r of data.inspections) if (r.period_month != null) months.add(r.period_month);
+  for (const d of data.defects) if (d.period_month != null) months.add(d.period_month);
+  for (const f of data.finals) if (f.period_month != null) months.add(f.period_month);
+  return months;
+}
+
+const daysBetween = (a: string, b: string): number =>
+  Math.abs(Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / 86_400_000;
+
+/**
+ * The day a screen opens on: today, and if nothing was filed today the closest
+ * day that was.
+ *
+ * Today is the answer the client asked for and the one a floor manager expects at
+ * the start of a shift. Falling back to the nearest filed day rather than to an
+ * empty screen is the other half of it — a Monday morning before the weekend's
+ * reports are keyed in should show Friday, not a wall of dashes that reads like a
+ * broken import. Ties go to the past: a day already filed beats one that is not.
+ */
+export function openingDate(data: QualityRecords): string | null {
+  const now = todayISO();
+
+  if (datasetGrain(data) === 'daily') {
+    const days = daysWithFigures(data);
+    if (days.size === 0) return latestDate(data);
+    if (days.has(now)) return now;
+    let best: string | null = null;
+    for (const day of days) {
+      if (best == null) { best = day; continue; }
+      const gap = daysBetween(day, now) - daysBetween(best, now);
+      if (gap < 0 || (gap === 0 && day < best)) best = day;
+    }
+    return best;
+  }
+
+  // Monthly: the closest month, pointed at from as near to today as it reaches, so
+  // that switching to Daily afterwards lands somewhere sensible rather than on the
+  // last of a month for no reason.
+  const months = [...monthsWithFigures(data)];
+  if (months.length === 0) return null;
+  let month = months[0]!;
+  for (const m of months) {
+    const gap = daysBetween(m, now) - daysBetween(month, now);
+    if (gap < 0 || (gap === 0 && m < month)) month = m;
+  }
+  const start = monthStart(month);
+  const end = monthEnd(month);
+  return now < start ? start : now > end ? end : now;
+}
+
+/** The oldest date any report reaches — the floor for the date field. */
+export function earliestDate(data: QualityRecords): string | null {
+  let best: string | null = null;
+  const offer = (d: string | null) => { if (d != null && (best == null || d < best)) best = d; };
+  for (const r of data.inspections) offer(r.inspection_date ?? r.period_month);
+  for (const d of data.defects) offer(d.inspection_date ?? d.period_month);
+  for (const f of data.finals) offer(f.period_month);
+  return best;
+}
+
+/**
+ * The pass-rate trend, built from the whole history rather than the selected
+ * window: a trend of one day is not a trend, and the point of the panel is the
+ * shape either side of wherever the window happens to sit.
+ */
+export function buildTrend(data: QualityRecords, grain: QualityGrain): TrendPoint[] {
+  const buckets = new Map<string, { checked: number; defects: number }>();
+  for (const r of data.inspections) {
+    if (!onFloor(r.stage)) continue;
+    const at = grain === 'daily' ? r.inspection_date : (r.inspection_date ? null : r.period_month);
+    if (at == null) continue;
+    const c = r.checked_qty ?? 0;
+    if (c <= 0) continue;
+    const d = r.defect_qty ?? (r.pass_qty != null ? c - r.pass_qty : 0);
+    const acc = buckets.get(at) ?? { checked: 0, defects: 0 };
+    buckets.set(at, { checked: acc.checked + c, defects: acc.defects + d });
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, v]) => ({
+      date, checked: v.checked, defects: v.defects, passPct: rate(v.checked, v.defects) ?? 0
+    }));
+}
 
 /** Numbered lines in floor order; anything unnumbered (a stray label) sorts last. */
 const byLineOrder = (a: { lineNo: number | null; label: string }, b: { lineNo: number | null; label: string }) => {
@@ -372,14 +544,16 @@ const byLineOrder = (a: { lineNo: number | null; label: string }, b: { lineNo: n
  */
 export function buildQualityMatrix(
   data: QualityRecords,
-  basis: QualityBasis,
-  period: string | null,
+  span: QualitySpan,
   threshold: number
 ): QualityMatrix {
-  const dated = data.inspections.filter((r) => periodOf(r, basis) != null);
-  const periods = [...new Set(dated.map((r) => periodOf(r, basis)!))].sort((a, b) => b.localeCompare(a));
-  const active = period && periods.includes(period) ? period : null;
-  const rows = active ? dated.filter((r) => periodOf(r, basis) === active) : dated;
+  const daily = dailyIn(data.inspections, span);
+  const monthly = monthlyIn(data.inspections, span);
+  // Daily wins wherever it exists: it is the finer grain and the one the window
+  // was drawn against. Monthly rows answer a month-wide window with nothing else
+  // in it — never alongside the days they already contain.
+  const grain: QualityGrain = daily.length > 0 || monthly.length === 0 ? 'daily' : 'monthly';
+  const rows = grain === 'daily' ? daily : monthly;
 
   let checked = 0;
   let defects = 0;
@@ -433,7 +607,7 @@ export function buildQualityMatrix(
     lineMap.set(key, line);
 
     if (counts) {
-      const p = periodOf(r, basis)!;
+      const p = pointOf(r, grain);
       const bucket = periodMap.get(p) ?? { checked: 0, defects: 0 };
       periodMap.set(p, { checked: bucket.checked + c, defects: bucket.defects + d });
     }
@@ -459,14 +633,14 @@ export function buildQualityMatrix(
     };
   }).sort(byLineOrder);
 
-  // Defect rows follow the same period rule. The monthly summaries record their
-  // categories at factory level, so excluding roll-ups there leaves nothing —
-  // per-line rows are preferred and factory rows are the fallback, never both.
-  const defectRows = data.defects.filter((d) => {
-    const p = periodOf(d, basis);
-    if (p == null) return false;
-    return active ? p === active : true;
-  });
+  // Defect rows follow the same window and the same grain rule, decided on their
+  // own supply: a factory can file daily inspection figures and only a monthly
+  // defect breakdown, and the breakdown is worth showing either way. The monthly
+  // summaries record their categories at factory level, so excluding roll-ups
+  // there leaves nothing — per-line rows are preferred and factory rows are the
+  // fallback, never both.
+  const dailyDefects = dailyIn(data.defects, span);
+  const defectRows = dailyDefects.length > 0 ? dailyDefects : monthlyIn(data.defects, span);
 
   // End line and appearance, on whichever basis is showing. A monthly second
   // summary is one column per category and names no gate at all; filtering that
@@ -515,15 +689,16 @@ export function buildQualityMatrix(
   }
 
   const aql = stageMap.get('aql');
-  const finalInspection = buildFinalInspection(data.finals, basis === 'monthly' ? active : null);
+  const finalInspection = buildFinalInspection(data.finals, span);
 
   return {
     // A factory that files only the pre-shipment inspection report still has
     // quality data to show, so it does not get the "no reports yet" screen.
-    hasData: rows.length > 0 || finalInspection.hasData,
-    basis,
-    periods,
-    period: active,
+    hasData: rows.length > 0 || defectRows.length > 0 || finalInspection.hasData,
+    span,
+    grain,
+    hasMonthlySummaries: hasMonthlySummaries(data),
+    hasDailyReports: hasDailyReports(data),
     checked,
     defects,
     passPct: rate(checked, defects),
@@ -553,18 +728,21 @@ const rate = (checked: number, defects: number): number | null =>
  *
  * It is never folded into the line figures: one audit covers the styles shipping
  * that month rather than the line that sewed them, and adding a factory-level
- * audit to per-line stage totals would double-count the same garments. The daily
- * basis leaves the month filter off entirely — the report has no daily grain, and
- * hiding it on weekdays would make the screen look as if it did not exist.
+ * audit to per-line stage totals would double-count the same garments. The report
+ * has no daily grain, so a day or a week is answered with the month it falls in
+ * rather than with nothing — the audit is a fact about that month however narrow
+ * the window over it happens to be.
  */
 export function buildFinalInspection(
   rows: FinalInspectionRow[],
-  month: string | null
+  span: QualitySpan | null
 ): FinalInspectionSummary {
+  const first = span ? monthStart(span.from) : null;
+  const last = span ? monthStart(span.to) : null;
   const byMonth = new Map<string, { checked: number; defects: number; passPct: number | null }>();
   for (const r of rows) {
     if (!r.period_month) continue;
-    if (month && r.period_month !== month) continue;
+    if (first && last && (r.period_month < first || r.period_month > last)) continue;
     const acc = byMonth.get(r.period_month) ?? { checked: 0, defects: 0, passPct: null };
     acc.checked += r.checked_qty ?? 0;
     acc.defects += r.defect_qty ?? 0;

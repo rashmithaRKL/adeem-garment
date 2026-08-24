@@ -4,14 +4,19 @@ import { Card } from '@/components/Card';
 import { Kpi } from '@/components/Kpi';
 import { QueryState } from '@/components/QueryState';
 import { Donut, BarChart, LineChart, seriesColor } from '@/components/charts';
-import { formatNumber } from '@/lib/format';
+import { formatDate, formatNumber } from '@/lib/format';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
 import { useAuth } from '@/features/auth/AuthProvider';
 import {
-  fetchQualityRecords, buildQualityMatrix, FLOOR_STAGES, DEFECT_STAGES,
-  type QualityBasis, type FinalStatus, type LineQualityRow, type QualityMatrix, type StageStat
+  fetchQualityRecords, buildQualityMatrix, buildTrend, datasetGrain, earliestDate, latestDate,
+  FLOOR_STAGES, DEFECT_STAGES, openingDate,
+  type FinalStatus, type LineQualityRow, type QualityGrain, type QualityMatrix, type QualityRecords,
+  type StageStat
 } from './queries';
-import { QualityPeriodPicker, periodLabel } from './QualityPeriodPicker';
+import {
+  axisLabel, spanFor, spanLabel, today, type QualityRange
+} from './period';
+import { QualityPeriodPicker } from './QualityPeriodPicker';
 import { STAGE_LABEL, type QualityStage } from './types';
 
 /** "In line, End line and Appearance" — the phrase every caption below needs. */
@@ -58,27 +63,53 @@ const FINAL_COLOR: Record<FinalStatus, string> = {
 
 const pctText = (n: number | null): string => (n == null ? '—' : n.toFixed(1) + '%');
 
-/** Short enough for an axis: "12 Aug" daily, "Aug 26" monthly. */
-const shortPeriod = (period: string, basis: QualityBasis): string =>
-  new Date(period).toLocaleDateString('en-GB',
-    basis === 'daily' ? { day: '2-digit', month: 'short' } : { month: 'short', year: '2-digit' });
+/**
+ * An empty window is almost never an empty database, so the message says which of
+ * the two it is and where the figures actually are. "No data" on a screen holding
+ * a year of reports is the kind of message that gets a working import declared
+ * broken.
+ */
+function emptyBody(matrix: QualityMatrix, latest: string | null): string {
+  if (latest == null) {
+    return 'Import a KPI report, a daily quality performance report or a monthly summary '
+      + 'from the Upload Excel screen. Every figure on this page is read from those workbooks.';
+  }
+  if (matrix.span.range !== 'month' && !matrix.hasDailyReports && matrix.hasMonthlySummaries) {
+    return 'The reports imported here are monthly summaries, and a summary covers a whole '
+      + 'month — switch to Monthly to read it. Charging a month of production against a '
+      + 'single day would be a different figure entirely.';
+  }
+  return 'Nothing was inspected in this window. The newest report reaches '
+    + formatDate(latest) + ' — press Latest to jump to it, or step back with the arrows.';
+}
+
+const NO_RECORDS: QualityRecords = { inspections: [], defects: [], lines: [], finals: [] };
 
 /**
- * Quality, line by line, on the basis the client reads it: daily during the week
- * and monthly at review. The two are never mixed — a monthly summary already
- * contains its own days, and adding them together counts every piece twice.
+ * Quality, line by line, over the window the client reads it in: today, the
+ * calendar week, or the month. Daily and monthly rows are never mixed — a monthly
+ * summary already contains its own days, and adding them together counts every
+ * piece twice.
  */
 export function QualityManagementPage() {
-  const [basis, setBasis] = useState<QualityBasis>('daily');
-  const [period, setPeriod] = useState<string | null>(null);
+  // null means "follow the reports": the range opens on the grain the factory
+  // actually files, and the window on today — or on the closest day that carries
+  // figures, so a Monday before the weekend's sheets are keyed in shows Friday
+  // rather than a wall of dashes. Both pin the moment the user touches the control.
+  const [range, setRange] = useState<QualityRange | null>(null);
+  const [anchor, setAnchor] = useState<string | null>(null);
   const { profile } = useAuth();
 
   const records = useQuery({ queryKey: ['quality', 'records'], queryFn: fetchQualityRecords });
-  const data = records.data ?? { inspections: [], defects: [], lines: [], finals: [] };
+  const data = records.data ?? NO_RECORDS;
 
-  // The period picker is per basis, so switching basis drops a selection that
-  // no longer names anything — the builder falls back to every period.
-  const matrix = buildQualityMatrix(data, basis, period, EFFICIENCY_THRESHOLD);
+  const latest = latestDate(data);
+  const earliest = earliestDate(data);
+  const span = spanFor(
+    range ?? (datasetGrain(data) === 'daily' ? 'day' : 'month'),
+    anchor ?? openingDate(data) ?? today()
+  );
+  const matrix = buildQualityMatrix(data, span, EFFICIENCY_THRESHOLD);
 
   /**
    * The manager's tile, and only the manager's. Rejection is the same figures as
@@ -105,11 +136,11 @@ export function QualityManagementPage() {
   return (
     <>
       <QualityPeriodPicker
-        basis={basis}
-        period={matrix.period}
-        periods={matrix.periods}
-        onBasis={setBasis}
-        onPeriod={setPeriod}
+        span={span}
+        latest={latest}
+        earliest={earliest}
+        onRange={setRange}
+        onAnchor={setAnchor}
         note={<>
           Pass{showRejection && ', rejection'} and final inspection are judged against
           the {EFFICIENCY_THRESHOLD}% threshold.
@@ -120,14 +151,10 @@ export function QualityManagementPage() {
         isLoading={records.isLoading}
         error={records.error}
         isEmpty={!matrix.hasData}
-        emptyTitle={basis === 'daily' ? 'No daily quality reports' : 'No monthly quality reports'}
-        emptyBody={
-          'Import a KPI report, a daily quality performance report or a monthly summary from '
-          + 'the Upload Excel screen. This page reads the ' + basis + ' rows in those workbooks; '
-          + (basis === 'daily'
-            ? 'a factory that only files monthly summaries will find its figures under Monthly.'
-            : 'daily reports appear under Daily instead.')
-        }
+        emptyTitle={latest == null
+          ? 'No quality reports yet'
+          : 'Nothing inspected in ' + spanLabel(span)}
+        emptyBody={emptyBody(matrix, latest)}
       >
         <div className="grid grid--kpi">
           {/* Checked, defects, pass and rejection are all one figure read four
@@ -162,7 +189,7 @@ export function QualityManagementPage() {
 
         <p style={{ margin: '12px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
           Pieces checked and defects are {stageList(FLOOR_STAGES)} added together, for{' '}
-          {matrix.period ? periodLabel(matrix.period, basis) : `all ${matrix.periods.length} ${basis === 'daily' ? 'days' : 'months'}`}.
+          {spanLabel(span)}.
           Final inspection and the AQL audit sample goods already counted at those gates, so they
           keep their own tiles and are never added in — counting them twice would drag the pass
           rate towards whatever the sample said.
@@ -220,9 +247,7 @@ export function QualityManagementPage() {
               slices={matrix.topDefects.map((d, i) => ({
                 label: d.category, value: d.qty, color: seriesColor(i)
               }))}
-              empty={basis === 'daily'
-                ? 'No defect categories were recorded on this day.'
-                : 'No defect categories were recorded in this month.'}
+              empty={'No defect categories were recorded in ' + spanLabel(span) + '.'}
             />
             <p style={{ margin: '12px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
               {matrix.defectsGated
@@ -231,29 +256,29 @@ export function QualityManagementPage() {
                   + 'counts are rework rather than defects leaving the line, and are left out here.'
                 : 'The reports imported for this period do not say which gate each category was '
                   + 'counted at, so every category they carry is shown.'}
-              {' '}Shown {basis === 'daily' ? 'daily' : 'monthly'}
-              {matrix.period ? ' for ' + periodLabel(matrix.period, basis) : ', across every period'}.
+              {' '}Counted over {spanLabel(span)}.
             </p>
           </Card>
         </div>
 
-        <Card title={basis === 'daily' ? 'Pass rate day by day' : 'Pass rate month by month'}
+        <Card title={matrix.grain === 'daily' ? 'Pass rate day by day' : 'Pass rate month by month'}
           style={{ marginTop: 16 }}
           aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-            every period in the report, not just the one selected
+            the whole history, not just the selected window
           </span>}>
           {/* Deliberately built from the full history rather than the selected
-              period: a trend of one point is not a trend. */}
-          <TrendPanel basis={basis} data={data} />
+              window: a trend of one point is not a trend, and the point of the
+              panel is the shape either side of wherever the window sits. */}
+          <TrendPanel grain={matrix.grain} data={data} />
         </Card>
 
         <FinalInspectionCard
           summary={matrix.finalInspection}
-          month={basis === 'monthly' ? matrix.period : null} />
+          month={span.range === 'month' ? span.anchor : null} />
 
         <Card title="Line by line" style={{ marginTop: 16 }}
           aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-            {matrix.period ? periodLabel(matrix.period, basis) : 'all periods'}
+            {spanLabel(span)}
           </span>}>
           <div className="table-scroll">
             <table className="table" style={{ minWidth: 860 }}>
@@ -475,12 +500,12 @@ function LineRow({ line, showRejection }: { line: LineQualityRow; showRejection:
   );
 }
 
-/** The trend ignores the period filter on purpose, so it is built separately. */
-function TrendPanel({ basis, data }: {
-  basis: QualityBasis;
-  data: Parameters<typeof buildQualityMatrix>[0];
+/** The trend ignores the window filter on purpose, so it is built separately. */
+function TrendPanel({ grain, data }: {
+  grain: QualityGrain;
+  data: QualityRecords;
 }) {
-  const full = buildQualityMatrix(data, basis, null, EFFICIENCY_THRESHOLD);
+  const points = buildTrend(data, grain);
   return (
     <LineChart
       domain="percent"
@@ -488,12 +513,12 @@ function TrendPanel({ basis, data }: {
       height={220}
       threshold={{ value: EFFICIENCY_THRESHOLD, label: EFFICIENCY_THRESHOLD + '% target' }}
       format={(n) => n.toFixed(1) + '%'}
-      points={full.trend.map((p) => ({
-        label: shortPeriod(p.date, basis),
+      points={points.map((p) => ({
+        label: axisLabel(p.date, grain === 'daily' ? 'day' : 'month'),
         values: { pass: p.passPct }
       }))}
       series={[{ key: 'pass', label: 'Pass rate', color: 'var(--chart-1)' }]}
-      empty={`Two or more ${basis === 'daily' ? 'days' : 'months'} are needed before a trend means anything.`}
+      empty={`Two or more ${grain === 'daily' ? 'days' : 'months'} are needed before a trend means anything.`}
     />
   );
 }
