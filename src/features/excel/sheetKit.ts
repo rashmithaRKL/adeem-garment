@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { isGuideSheet } from './guideSheet';
 
 /**
  * Shared machinery for the header-driven importers (HR attendance, loading plan).
@@ -142,6 +143,9 @@ export async function readTables(file: File, specs: ColumnSpec[]): Promise<Sheet
 
   const tables: SheetTable[] = [];
   for (const sheet of workbook.SheetNames) {
+    // The guide sheet on a downloaded template lists the headers being looked
+    // for here, one per row, so it reads as a table of its own if it is let in.
+    if (isGuideSheet(sheet)) continue;
     const ws = workbook.Sheets[sheet];
     if (!ws || !ws['!ref']) continue;
 

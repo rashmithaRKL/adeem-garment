@@ -3,18 +3,18 @@ import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { Kpi } from '@/components/Kpi';
 import { QueryState } from '@/components/QueryState';
-import { Donut, BarChart, LineChart, seriesColor } from '@/components/charts';
+import { Donut, BarChart, DefectMatrix, LineChart, seriesColor } from '@/components/charts';
 import { formatDate, formatNumber } from '@/lib/format';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
 import { useAuth } from '@/features/auth/AuthProvider';
 import {
   fetchQualityRecords, buildQualityMatrix, buildTrend, datasetGrain, earliestDate, latestDate,
   FLOOR_STAGES, DEFECT_STAGES, openingDate,
-  type FinalStatus, type LineQualityRow, type QualityGrain, type QualityMatrix, type QualityRecords,
-  type StageStat
+  type FinalLineStat, type FinalStatus, type LineQualityRow, type QualityGrain,
+  type QualityMatrix, type QualityRecords, type StageStat
 } from './queries';
 import {
-  axisLabel, spanFor, spanLabel, today, type QualityRange
+  axisLabel, spanFor, spanLabel, today, RANGE_LABEL, type QualitySpan, type QualityRange
 } from './period';
 import { QualityPeriodPicker } from './QualityPeriodPicker';
 import { STAGE_LABEL, type QualityStage } from './types';
@@ -129,10 +129,6 @@ export function QualityManagementPage() {
     key: stage, label: STAGE_LABEL[stage], color: seriesColor(i)
   }));
 
-  const defectSeries = matrix.topDefects.map((d, i) => ({
-    key: d.category, label: d.category, color: seriesColor(i)
-  }));
-
   return (
     <>
       <QualityPeriodPicker
@@ -221,18 +217,19 @@ export function QualityManagementPage() {
         </Card>
 
         <div className="grid grid--split" style={{ marginTop: 16 }}>
+          {/* A grid, not a stack. In a stack only the bottom segment sits on a
+              common baseline, so comparing one defect across four lines — the
+              question this panel exists to answer — meant judging floating
+              blocks at different heights, and a four-piece category drew a
+              sliver with no number on it anywhere. */}
           <Card title="Where the top defects came from"
             aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-              quantity, stacked per line
+              pieces per line · {spanLabel(span)}
             </span>}>
-            <BarChart
-              stacked
-              height={240}
-              data={matrix.defectsByLine.map((line) => ({
-                label: line.label.replace(/^line\s*/i, 'L'),
-                values: line.byCategory
-              }))}
-              series={defectSeries}
+            <DefectMatrix
+              lines={matrix.defectsByLine}
+              categories={matrix.topDefects}
+              periodLabel={spanLabel(span)}
               empty="This report carried no per-line defect breakdown. The overall split is beside this panel."
             />
           </Card>
@@ -272,9 +269,7 @@ export function QualityManagementPage() {
           <TrendPanel grain={matrix.grain} data={data} />
         </Card>
 
-        <FinalInspectionCard
-          summary={matrix.finalInspection}
-          month={span.range === 'month' ? span.anchor : null} />
+        <FinalInspectionCard summary={matrix.finalInspection} />
 
         <Card title="Line by line" style={{ marginTop: 16 }}
           aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
@@ -361,69 +356,287 @@ function Figure({ label, value, sub, color }: {
   );
 }
 
+/** "17 – 23 Aug 2026, daily" — the window and the grain in one phrase. */
+const windowLabel = (span: QualitySpan): string =>
+  `${spanLabel(span)} · ${RANGE_LABEL[span.range].toLowerCase()}`;
+
+/** The months a monthly breakdown was read from, written out. */
+const monthList = (months: string[]): string =>
+  months.length < 2
+    ? months.map(monthLabel).join('')
+    : months.slice(0, -1).map(monthLabel).join(', ') + ' and ' + monthLabel(months[months.length - 1]!);
+
 /**
- * The pre-shipment final inspection — the gate the buyer sees, filed per month
- * for the factory rather than per line. It was being imported and then dropped:
- * every quality query excludes the sheets' Factory roll-up rows, and final
- * inspection is the one stage that is only ever filed that way, so the report
- * had nowhere on the screen to land.
+ * Final inspection — the gate the buyer sees, read the way the client reads every
+ * other gate: over the selected day, week or month, line by line, with pass and
+ * fail counted both ways and a total underneath.
+ *
+ * The per-line figures come from the FINAL block on the KPI and daily sheets, and
+ * count pieces. The pre-shipment audit at the foot of the card comes from the
+ * monthly inspection report and counts styles that cleared at the first attempt.
+ * They are two different measurements of the same gate and are never added
+ * together — which is why the audit sits in a block of its own, labelled, rather
+ * than in the totals row.
  */
-function FinalInspectionCard({ summary, month }: {
-  summary: QualityMatrix['finalInspection'];
-  /** The month the picker is on, or null for every month at once. */
-  month: string | null;
-}) {
+function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspection'] }) {
+  const span = summary.span;
+  const inspected = summary.lines.filter((l) => l.inspections > 0);
+  const failing = inspected.filter((l) => (l.passPct ?? 100) < EFFICIENCY_THRESHOLD).length;
+
   return (
     <Card title="Final inspection" style={{ marginTop: 16 }}
       aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-        pre-shipment audit, factory-wide
+        {windowLabel(span)}
       </span>}>
       {!summary.hasData ? (
         <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.7 }}>
-          {month
-            ? `No final inspection was filed for ${monthLabel(month)}. Pick another month, or `
-              + 'switch to all months, to see the ones that were.'
-            : 'No final inspection figures have been imported yet. They come from the monthly '
-              + 'inspection report — the workbook with the Summary sheet listing qty shipped, '
-              + 'sample inspected, defects and the first-time pass rate — uploaded from the '
-              + 'Upload Excel screen.'}
+          No final inspection was recorded in {spanLabel(span)}. The figures come from the
+          FINAL block on the KPI and daily quality reports, and from the monthly inspection
+          report's Summary sheet — step back with the arrows, or press Latest, to reach a
+          period that carries them.
         </p>
       ) : (
         <>
-          {/* A flat strip rather than KPI tiles: those render as cards of their
+          {/* The total summary, up front: how many inspections, over how many
+              pieces, and the pass/fail split both as a count and as a rate. A
+              flat strip rather than KPI tiles — those render as cards of their
               own, and a card inside a card reads as a nesting that means nothing. */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px 40px' }}>
             <Figure
+              label="Inspections"
+              value={formatNumber(summary.inspections)}
+              sub={summary.lineWise
+                ? `${inspected.length} of ${summary.lines.length} lines · ${summary.grain === 'daily' ? 'day by day' : 'month by month'}`
+                : 'factory-wide audit only'} />
+            <Figure
+              label="Pieces inspected"
+              value={formatNumber(summary.checked)}
+              sub={summary.inspections > 0
+                ? Math.round(summary.checked / summary.inspections) + ' per inspection'
+                : 'nothing inspected in this window'} />
+            <Figure
+              label="Pass"
+              value={formatNumber(summary.pass)}
+              sub={pctText(summary.passPct) + ' of pieces inspected'}
+              color="var(--green-500)" />
+            <Figure
+              label="Fail"
+              value={formatNumber(summary.fail)}
+              sub={pctText(summary.failPct) + ' of pieces inspected'}
+              color="var(--red-500)" />
+          </div>
+
+          {summary.lineWise ? (
+            <div className="table-scroll" style={{ marginTop: 16 }}>
+              <table className="table" style={{ minWidth: 780 }}>
+                <thead>
+                  <tr>
+                    <th>Line</th>
+                    <th className="num">Inspections</th>
+                    <th className="num">Checked</th>
+                    <th className="num">Pass</th>
+                    <th className="num">Fail</th>
+                    <th className="num">Pass %</th>
+                    <th className="num">Fail %</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.lines.map((line) => <FinalLineRow key={line.key} line={line} />)}
+                </tbody>
+                {/* The totals are the column sums, except the two rates: those are
+                    the factory's own pass and fail over the factory's own pieces,
+                    which is not the average of the rates above them. A line that
+                    inspected 20 pieces and one that inspected 2,000 do not carry
+                    equal weight in the figure the client quotes. */}
+                <tfoot>
+                  <tr>
+                    <td>Total</td>
+                    <td className="num">{formatNumber(summary.inspections)}</td>
+                    <td className="num">{formatNumber(summary.checked)}</td>
+                    <td className="num">{formatNumber(summary.pass)}</td>
+                    <td className="num">{formatNumber(summary.fail)}</td>
+                    <td className="num" style={{
+                      color: (summary.passPct ?? 0) >= EFFICIENCY_THRESHOLD
+                        ? 'var(--text)' : 'var(--red-500)'
+                    }}>
+                      {pctText(summary.passPct)}
+                    </td>
+                    <td className="num">{pctText(summary.failPct)}</td>
+                    <td style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-faint)' }}>
+                      {failing === 0
+                        ? 'every line at or above target'
+                        : failing + (failing === 1 ? ' line' : ' lines') + ' below target'}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          ) : (
+            <p style={{ margin: '16px 0 0', fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+              The reports covering {spanLabel(span)} record the final inspection for the factory
+              as a whole rather than line by line, so there is nothing to attribute — the
+              pre-shipment audit below is the whole of it. Per-line pass and fail counts come
+              from the FINAL block on the KPI reports.
+            </p>
+          )}
+
+          <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+            Pass and fail count pieces at the final gate, over {spanLabel(span)}. Pass % and
+            Fail % are each line's own counts over its own pieces, so the pair reads to 100%
+            on every row. A line reads “Not inspected” when the reports imported for this
+            period record no final gate for it — that is not a zero pass rate. These figures
+            are deliberately absent from the pieces-checked and pass-rate tiles at the top of
+            the page: final inspection judges goods already counted at In line, End line and
+            Appearance, and adding it in would count the same garments twice.
+          </p>
+
+          <div className="grid grid--split" style={{ marginTop: 16 }}>
+            <Card title="Final inspection top 5 defects"
+              aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+                {summary.defectMonths.length > 0 ? 'filed monthly' : windowLabel(span)}
+              </span>}>
+              <Donut
+                size={158}
+                centerLabel="defects"
+                slices={summary.topDefects.map((d, i) => ({
+                  label: d.category, value: d.qty, color: seriesColor(i)
+                }))}
+                empty={'No final inspection defects were recorded in ' + spanLabel(span) + '.'}
+              />
+              {summary.topDefects.length > 0 && (
+                <p style={{ margin: '12px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+                  {/* The breakdown is filed one column per category per month, so a
+                      day or a week has to borrow its month — and say which one it
+                      borrowed, rather than let a month of findings sit silently
+                      under a Tuesday's heading. */}
+                  {summary.defectsWiderThanSpan
+                    ? `The final inspection defect breakdown is only filed monthly, so this covers ${monthList(summary.defectMonths)} in full — not just ${spanLabel(span)}.`
+                    : 'Counted at the final gate only. The sewing-floor breakdown higher up the '
+                      + 'page counts End line and Appearance, and the two are kept apart — a '
+                      + 'defect caught before shipping is a different fact from one caught on '
+                      + 'the line.'}
+                </p>
+              )}
+            </Card>
+
+            <FinalAuditCard audit={summary.audit} span={span} />
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function FinalLineRow({ line }: { line: FinalLineStat }) {
+  const faint = { color: 'var(--text-faint)' };
+  if (line.inspections === 0) {
+    return (
+      <tr>
+        <td style={{ font: '600 13.5px var(--font-heading)', letterSpacing: '.06em' }}>{line.label}</td>
+        <td className="num" style={faint}>—</td>
+        <td className="num" style={faint}>—</td>
+        <td className="num" style={faint}>—</td>
+        <td className="num" style={faint}>—</td>
+        <td className="num" style={faint}>—</td>
+        <td className="num" style={faint}>—</td>
+        <td>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}>
+            <span aria-hidden style={{
+              width: 9, height: 9, borderRadius: '50%', background: FINAL_COLOR.not_inspected
+            }} />
+            {FINAL_LABEL.not_inspected}
+          </span>
+        </td>
+      </tr>
+    );
+  }
+
+  const passing = (line.passPct ?? 0) >= EFFICIENCY_THRESHOLD;
+  return (
+    <tr>
+      <td style={{ font: '600 13.5px var(--font-heading)', letterSpacing: '.06em' }}>{line.label}</td>
+      <td className="num">{formatNumber(line.inspections)}</td>
+      <td className="num">{formatNumber(line.checked)}</td>
+      <td className="num" style={{ color: 'var(--green-500)' }}>{formatNumber(line.pass)}</td>
+      <td className="num" style={{ color: line.fail > 0 ? 'var(--red-500)' : 'var(--text-faint)' }}>
+        {formatNumber(line.fail)}
+      </td>
+      <td className="num" style={{ fontWeight: 600, color: passing ? 'var(--text)' : 'var(--red-500)' }}>
+        {pctText(line.passPct)}
+      </td>
+      <td className="num" style={{ color: 'var(--text-muted)' }}>{pctText(line.failPct)}</td>
+      <td>
+        {/* Colour plus a word: the status never rides on the swatch alone. */}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}>
+          <span aria-hidden style={{
+            width: 9, height: 9, borderRadius: '50%', background: FINAL_COLOR[line.status]
+          }} />
+          {FINAL_LABEL[line.status]}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * The pre-shipment audit, kept in a panel of its own.
+ *
+ * Its "1st time pass rate" counts styles that cleared the audit at the first
+ * attempt, while the sample and defect columns beside it count pieces. That is
+ * how the report measures it, and the two are shown side by side rather than
+ * reconciled — a styles rate averaged into a pieces rate is a number with no
+ * meaning at all, which is the reason this is not part of the totals above.
+ */
+function FinalAuditCard({ audit, span }: {
+  audit: QualityMatrix['finalInspection']['audit'];
+  span: QualitySpan;
+}) {
+  return (
+    <Card title="Pre-shipment audit"
+      aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+        factory-wide, monthly
+      </span>}>
+      {!audit.hasData ? (
+        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+          No pre-shipment audit covers {spanLabel(span)}. It is read from the monthly
+          inspection report — the workbook with the Summary sheet listing qty shipped,
+          sample inspected, defects and the first-time pass rate.
+        </p>
+      ) : (
+        <>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px 32px' }}>
+            <Figure
               label="First-time pass rate"
-              value={pctText(summary.latest?.passPct ?? null)}
-              sub={summary.latest ? monthLabel(summary.latest.month) : 'no month with figures'}
-              color={summary.latest?.passPct != null && summary.latest.passPct < EFFICIENCY_THRESHOLD
+              value={pctText(audit.latest?.passPct ?? null)}
+              sub={audit.latest ? monthLabel(audit.latest.month) : 'no month with figures'}
+              color={audit.latest?.passPct != null && audit.latest.passPct < EFFICIENCY_THRESHOLD
                 ? 'var(--red-500)'
                 : 'var(--green-500)'} />
             <Figure
               label="Sample inspected"
-              value={formatNumber(summary.checked)}
-              sub={summary.months.length + (summary.months.length === 1 ? ' month' : ' months')} />
+              value={formatNumber(audit.checked)}
+              sub={audit.months.length + (audit.months.length === 1 ? ' month' : ' months')} />
             <Figure
               label="Audit defects"
-              value={formatNumber(summary.defects)}
-              sub={summary.defectPct == null
+              value={formatNumber(audit.defects)}
+              sub={audit.defectPct == null
                 ? 'nothing sampled yet'
-                : pctText(summary.defectPct) + ' of the sample'} />
+                : pctText(audit.defectPct) + ' of the sample'} />
           </div>
 
           <div className="table-scroll" style={{ marginTop: 14 }}>
-            <table className="table" style={{ minWidth: 460 }}>
+            <table className="table" style={{ minWidth: 420 }}>
               <thead>
                 <tr>
                   <th>Month</th>
-                  <th className="num">Sample inspected</th>
+                  <th className="num">Sample</th>
                   <th className="num">Defects</th>
                   <th className="num">First-time pass</th>
                 </tr>
               </thead>
               <tbody>
-                {summary.months.map((m) => (
+                {audit.months.map((m) => (
                   <tr key={m.month}>
                     <td>{monthLabel(m.month)}</td>
                     <td className="num">{formatNumber(m.checked)}</td>
@@ -444,8 +657,9 @@ function FinalInspectionCard({ summary, month }: {
 
           <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
             The first-time pass rate counts styles that cleared the audit at the first
-            attempt, while sample inspected and defects count pieces. The two are shown side
-            by side rather than reconciled, because the report measures them that way.
+            attempt; sample and defects count pieces. The report measures them that way, so
+            they are shown that way rather than reconciled — and neither is added into the
+            per-line totals above.
           </p>
         </>
       )}

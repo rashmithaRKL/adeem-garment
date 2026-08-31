@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { requiredHits, scoreHeaders } from './columnDetection';
+import { isGuideSheet } from './guideSheet';
 
 /**
  * Works out how a production workbook is actually laid out, because no two
@@ -107,7 +108,7 @@ export interface SheetLayout {
   signature: string;
 }
 
-interface Grid {
+export interface Grid {
   cells: unknown[][];
   /** Sheet row index the grid starts at, so Excel row numbers stay truthful. */
   firstRow: number;
@@ -122,7 +123,7 @@ interface Grid {
  * value is copied across the range instead, so a band heading covers its block
  * and an order number merged down three rows belongs to all three.
  */
-function readGrid(ws: XLSX.WorkSheet): Grid {
+export function readGrid(ws: XLSX.WorkSheet): Grid {
   const ref = ws['!ref'];
   if (!ref) return { cells: [], firstRow: 0, width: 0 };
 
@@ -164,7 +165,7 @@ function readGrid(ws: XLSX.WorkSheet): Grid {
 }
 
 /** Contiguous runs of the same label, which is what a filled merge looks like. */
-function runsOf(row: unknown[], width: number): { label: string; start: number; end: number }[] {
+export function runsOf(row: unknown[], width: number): { label: string; start: number; end: number }[] {
   const runs: { label: string; start: number; end: number }[] = [];
   for (let c = 0; c < width; c += 1) {
     const label = cellText(row[c]);
@@ -230,7 +231,22 @@ function detectBands(
   const firstColumns = spanOf(runs[0]!);
   const firstHeaders = headersOf(firstColumns);
   if (runs.some((run) => requiredHits(headersOf(spanOf(run))) < 1)) return flat;
-  if (requiredHits([...headersOf(sharedColumns), ...firstHeaders]) < MIN_BAND_REQUIRED_HITS) return flat;
+
+  // A band heading that reads "Line 01" supplies the line number itself, and that
+  // is a required field arriving from the layout rather than from a column. Not
+  // counting it meant a sheet whose blocks carry one required column each -- a
+  // produced quantity per line and nothing else -- fell short of the two-hit bar
+  // and was read as one flat table of repeated headers instead.
+  //
+  // The credit is only given when every run names a distinct line, which a merged
+  // report title cannot do: it is a single run and has already failed above.
+  const bandLines = runs.map((run) => lineFromLabel(run.label));
+  const suppliesLine = bandLines.every((n) => n != null)
+    && new Set(bandLines).size === bandLines.length;
+  const fromLayout = suppliesLine ? 1 : 0;
+  if (requiredHits([...headersOf(sharedColumns), ...firstHeaders]) + fromLayout < MIN_BAND_REQUIRED_HITS) {
+    return flat;
+  }
   if (runs.slice(1).some((run) => !repeatsHeaders(firstHeaders, headersOf(spanOf(run))))) return flat;
 
   // Logical columns in sheet order: the shared ones plus the first block's.
@@ -365,14 +381,18 @@ export interface WorkbookLayout {
  * norm here, and importing only the first tab quietly loses most of the day.
  */
 export function analyseWorkbook(workbook: XLSX.WorkBook): WorkbookLayout {
+  // The guide sheet on a downloaded template documents the very headers this
+  // scan looks for. It is not data and is not counted as a tab that was skipped.
+  const names = workbook.SheetNames.filter((n) => !isGuideSheet(n));
+
   const all: SheetLayout[] = [];
-  for (const name of workbook.SheetNames) {
+  for (const name of names) {
     const ws = workbook.Sheets[name];
     if (!ws) continue;
     const layout = analyseSheet(name, ws);
     if (layout) all.push(layout);
   }
-  if (all.length === 0) return { sheetCount: workbook.SheetNames.length, layouts: [], skipped: [] };
+  if (all.length === 0) return { sheetCount: names.length, layouts: [], skipped: [] };
 
   const ranked = [...all].sort((a, b) => b.score - a.score);
   const best = ranked[0]!;
@@ -382,8 +402,8 @@ export function analyseWorkbook(workbook: XLSX.WorkBook): WorkbookLayout {
   const kept = new Set(layouts.map((l) => l.sheet));
 
   return {
-    sheetCount: workbook.SheetNames.length,
+    sheetCount: names.length,
     layouts: layouts.length > 0 ? layouts : [best],
-    skipped: workbook.SheetNames.filter((n) => !kept.has(n))
+    skipped: names.filter((n) => !kept.has(n))
   };
 }

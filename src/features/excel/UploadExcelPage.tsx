@@ -5,6 +5,7 @@ import { formatBytes, formatNumber, formatDateTime, compressionRatio } from '@/l
 import { MAX_UPLOAD_BYTES } from '@/lib/env';
 import type { MappableField } from '@/types/domain';
 import { useUploadFlow, SCAN_STAGES } from './useUploadFlow';
+import { TemplateLibrary } from './TemplateLibrary';
 import { STAGE_LABEL } from '@/features/quality/types';
 import { useIsManager } from '@/features/auth/AuthProvider';
 
@@ -26,15 +27,16 @@ const STEPS: { id: string; label: string }[] = [
  * every dot greys out mid-import, which reads as though the flow had reset.
  */
 const STEP_ALIAS: Record<string, string> = {
-  duplicate: 'preview', importing: 'preview',
+  duplicate: 'preview', importing: 'preview', unsupported: 'mapping',
   quality: 'preview', qualityDuplicate: 'preview', qualityDone: 'done',
-  sheet: 'preview', sheetDone: 'done'
+  sheet: 'preview', sheetDone: 'done',
+  rejection: 'preview', rejectionDuplicate: 'preview', rejectionDone: 'done'
 };
 
 export function UploadExcelPage() {
   const {
-    state, blocking, selectFile, setMapping, confirmMapping,
-    runImport, runQualityImport, runSheetImport, reset
+    state, blocking, selectFile, setMapping, confirmMapping, mapAnyway,
+    runImport, runQualityImport, runSheetImport, runRejectionImport, reset
   } = useUploadFlow();
   const inputRef = useRef<HTMLInputElement>(null);
   // The same flow is mounted under /admin and /employee, so every link back into
@@ -90,9 +92,9 @@ export function UploadExcelPage() {
               Drop your Excel here
             </p>
             <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: 0 }}>
-              Production, quality, HR attendance or loading plan — the kind is recognised from the
-              headers. .xlsx or .xls · max {formatBytes(MAX_UPLOAD_BYTES)} · scanned and validated
-              before anything is imported
+              Production, quality, rejection, HR attendance or loading plan — the kind is recognised
+              from the headers. .xlsx or .xls · max {formatBytes(MAX_UPLOAD_BYTES)} · scanned and
+              validated before anything is imported
             </p>
             <span className="btn btn--primary" style={{ display: 'inline-block', marginTop: 18 }}>Select file</span>
             <input ref={inputRef} type="file" accept=".xlsx,.xls" hidden
@@ -100,6 +102,11 @@ export function UploadExcelPage() {
           </div>
         </Card>
       )}
+
+      {/* The list of what this screen accepts belongs on the screen that accepts
+          it: a supervisor holding a workbook can see whether it is one of them,
+          which columns it needs, and take a blank copy without asking anyone. */}
+      {state.step === 'select' && <TemplateLibrary />}
 
       {state.step === 'scanning' && (
         <Card>
@@ -154,6 +161,66 @@ export function UploadExcelPage() {
         </Card>
       )}
 
+      {state.step === 'unsupported' && state.diagnosis && (
+        <Card title="This workbook cannot be imported">
+          <p className="banner banner--error" style={{ marginTop: 0 }}>
+            <strong>This data cannot be stored.</strong>{' '}
+            {state.diagnosis.shape
+              ? `It is a ${state.diagnosis.shape.name}, and there is no table for ${state.diagnosis.shape.figure} — the production table has no column to put them in.`
+              : 'The production table has no column for the figures in this workbook.'}
+            {' '}Please contact the developer to have this report supported.
+          </p>
+
+          <p style={{ margin: '0 0 14px', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.7 }}>
+            A production record needs {state.diagnosis.missingNames.length > 1 ? 'these' : 'this'}, and
+            no column in the file holds{' '}
+            {state.diagnosis.missingNames.length > 1 ? 'them' : 'it'}:
+          </p>
+          <ul style={{ margin: '0 0 18px', paddingLeft: 20, color: 'var(--red-500)', fontSize: 13.5, lineHeight: 1.9 }}>
+            {state.diagnosis.missingNames.map((name) => <li key={name}><strong>{name}</strong></li>)}
+          </ul>
+
+          <p style={{ margin: '0 0 8px', color: 'var(--text-muted)', fontSize: 13 }}>
+            {state.parsed?.layoutNote}
+          </p>
+          <p style={{ margin: '0 0 10px', color: 'var(--text-muted)', fontSize: 13 }}>
+            The columns it does carry:
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 18 }}>
+            {state.diagnosis.headers.map((header) => {
+              // A column named as a figure the system has no home for is the
+              // reason the file is here, so it is marked rather than listed flat.
+              const foreign = state.diagnosis!.foreignHeaders.includes(header);
+              return (
+                <span key={header} className="mono" style={{
+                  fontSize: 12, padding: '5px 9px', borderRadius: 7,
+                  background: foreign ? 'var(--red-50)' : 'var(--surface-muted)',
+                  border: '1px solid ' + (foreign ? 'var(--red-200)' : 'var(--border-soft)'),
+                  color: foreign ? 'var(--red-500)' : 'var(--text-muted)'
+                }}>
+                  {header}{foreign && ' · not stored'}
+                </span>
+              );
+            })}
+          </div>
+
+          <p style={{ margin: '0 0 18px', fontSize: 12, color: 'var(--text-faint)', lineHeight: 1.7 }}>
+            If this really is a production sheet and its columns are simply named
+            differently, you can still assign them by hand — nothing is written until you
+            confirm the preview.
+          </p>
+
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn--secondary" onClick={mapAnyway}>
+              Map columns manually
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={reset}>
+              Choose another file
+            </button>
+          </div>
+        </Card>
+      )}
+
       {state.step === 'mapping' && (
         <Card title="Column mapping">
           {state.parsed?.layoutNote && (
@@ -199,7 +266,9 @@ export function UploadExcelPage() {
           {blocking.length > 0 && (
             <p className="banner banner--error" style={{ marginBottom: 0, marginTop: 16 }}>
               Choose a column for {blocking.map((f) => FIELD_LABELS[f]).join(', ')} before continuing —
-              without {blocking.length > 1 ? 'them' : 'it'} no row can be imported.
+              without {blocking.length > 1 ? 'them' : 'it'} no row can be imported. If this workbook
+              has no such column, it cannot be stored in the production table; contact the developer
+              to have the report supported.
             </p>
           )}
           <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
@@ -496,6 +565,155 @@ export function UploadExcelPage() {
             <Link className="btn btn--primary" style={{ textDecoration: 'none' }}
               to={base + (state.sheet.kind === 'hr' ? '/hr' : '/loading-plan')}>
               {state.sheet.kind === 'hr' ? 'View HR' : 'View loading plan'}
+            </Link>
+            <button type="button" className="btn btn--secondary" onClick={reset}>Upload another</button>
+          </div>
+        </Card>
+      )}
+
+      {state.step === 'rejection' && state.rejection && (
+        <>
+          <div className="banner" style={{
+            background: 'var(--blue-50)', border: '1px solid var(--info-border)', color: 'var(--text)',
+            marginBottom: 16, fontSize: 13.5
+          }}>
+            Recognised as a <strong>{state.rejection.label}</strong>. No column mapping is needed —
+            rejected pieces have their own table, so nothing here is written into production.
+          </div>
+
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', marginBottom: 16 }}>
+            {([
+              ['Lines covered', state.rejection.linesSeen.length, 'var(--text-muted)'],
+              ['Rows ready', state.rejection.rows.length, 'var(--green-500)'],
+              ['Rows skipped', state.rejection.errors.length, 'var(--red-500)'],
+              ['Pieces rejected', state.rejection.totals.rejectQty, 'var(--amber-500)']
+            ] as [string, number, string][]).map(([label, n, color]) => (
+              <div className="card" key={label}>
+                <div style={{ font: '600 24px/1 var(--font-heading)', color }}>{formatNumber(n)}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 5 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          <Card title="Preview" aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+            nothing is written until you confirm
+          </span>}>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--text-muted)' }}>
+              Covering {state.rejection.periodStart ?? '—'} to {state.rejection.periodEnd ?? '—'} ·
+              {' '}sheets used: {state.rejection.sheetsUsed.join(', ') || '—'} ·
+              {' '}lines {state.rejection.linesSeen.join(', ') || '—'}
+            </p>
+
+            <div className="table-scroll">
+              <table className="table" style={{ minWidth: 720 }}>
+                <thead>
+                  <tr>
+                    <th>Line</th><th>Date</th><th>Style</th>
+                    <th className="num">Order qty</th>
+                    <th className="num">Rejected</th>
+                    <th className="num">Reject %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.rejection.rows.slice(0, 12).map((r) => (
+                    <tr key={r.sheet + r.rowNumber + '-' + r.line_no}>
+                      <td style={{ fontWeight: 600 }}>{String(r.line_no).padStart(2, '0')}</td>
+                      <td>{r.production_date}</td>
+                      <td className="mono">{r.style_number ?? '—'}</td>
+                      <td className="num">{r.order_qty == null ? '—' : formatNumber(r.order_qty)}</td>
+                      <td className="num" style={{ color: 'var(--red-500)', fontWeight: 600 }}>
+                        {formatNumber(r.reject_qty)}
+                      </td>
+                      <td className="num">{r.reject_pct == null ? '—' : r.reject_pct.toFixed(2) + '%'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                {/* The totals let the user check this import against the TOTAL row
+                    at the foot of the workbook, which is itself skipped on the way
+                    in — a restatement of figures already counted is not a record. */}
+                <tfoot>
+                  <tr>
+                    <td colSpan={3}>Total</td>
+                    <td className="num">{formatNumber(state.rejection.totals.orderQty)}</td>
+                    <td className="num" style={{ color: 'var(--red-500)' }}>
+                      {formatNumber(state.rejection.totals.rejectQty)}
+                    </td>
+                    <td className="num">
+                      {state.rejection.totals.rejectPct == null
+                        ? '—'
+                        : state.rejection.totals.rejectPct.toFixed(2) + '%'}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            {state.rejection.rows.length > 12 && (
+              <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-faint)' }}>
+                Showing the first 12 of {formatNumber(state.rejection.rows.length)} rows.
+              </p>
+            )}
+
+            <p style={{ margin: '12px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
+              Reject % is worked out from the two counts beside it, not read from the sheet's own
+              % column: Excel stores a percentage typed as a plain number and one formatted as a
+              percent identically, and guessing wrong there turns 0.96% into 96%.
+            </p>
+
+            {state.rejection.warnings.slice(0, 3).map((w) => (
+              <p key={w} className="banner banner--warning" style={{ marginTop: 12, marginBottom: 0 }}>{w}</p>
+            ))}
+
+            {state.rejection.errors.length > 0 && (
+              <p className="banner banner--error" style={{ marginTop: 12, marginBottom: 0 }}>
+                {state.rejection.errors.length} row{state.rejection.errors.length > 1 ? 's' : ''} will be
+                skipped — the first is {state.rejection.errors[0]!.sheet} row{' '}
+                {state.rejection.errors[0]!.rowNumber}: {state.rejection.errors[0]!.message}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn--success"
+                onClick={() => void runRejectionImport()}
+                disabled={state.rejection.rows.length === 0}>
+                Import rejection data
+              </button>
+              <button type="button" className="btn btn--secondary" onClick={reset}>Cancel</button>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {state.step === 'rejectionDuplicate' && state.rejectionDuplicate && (
+        <Card>
+          <h3 style={{ fontSize: 21, margin: '0 0 5px' }}>This report has been uploaded before</h3>
+          <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13.5 }}>
+            The file hash matches an earlier upload. Rejection rows are appended rather than
+            replaced, so importing again would count every rejected piece twice.
+          </p>
+          <div style={{ background: 'var(--amber-50)', border: '1px solid var(--amber-200)', borderRadius: 10, padding: 14, display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+            <span><strong>File</strong><br />{state.rejectionDuplicate.original_filename}</span>
+            <span><strong>Uploaded</strong><br />{formatDateTime(state.rejectionDuplicate.created_at)}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn--primary" onClick={() => void runRejectionImport(true)}>
+              Import anyway
+            </button>
+            <button type="button" className="btn btn--ghost" onClick={reset}>Cancel</button>
+          </div>
+        </Card>
+      )}
+
+      {state.step === 'rejectionDone' && state.rejectionResult && (
+        <Card>
+          <h3 style={{ fontSize: 23, margin: '0 0 4px' }}>Rejection data imported</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13.5, margin: '0 0 20px' }}>
+            {formatNumber(state.rejectionResult.records)} rejection rows written in{' '}
+            {(state.rejectionResult.processingMs / 1000).toFixed(1)} s.
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Link className="btn btn--primary" to={base + '/dashboard'} style={{ textDecoration: 'none' }}>
+              View dashboard
             </Link>
             <button type="button" className="btn btn--secondary" onClick={reset}>Upload another</button>
           </div>

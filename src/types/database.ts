@@ -704,6 +704,100 @@ export interface Database {
         ];
       };
 
+      // --- 0013_rejection.sql ----------------------------------------------
+      rejection_uploads: {
+        Row: {
+          id: string;
+          uploaded_by: string;
+          original_filename: string;
+          file_hash: string;
+          sheet_names: string[];
+          period_start: string | null;
+          period_end: string | null;
+          record_count: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          uploaded_by: string;
+          original_filename: string;
+          file_hash: string;
+          sheet_names?: string[];
+          period_start?: string | null;
+          period_end?: string | null;
+          record_count?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          uploaded_by?: string;
+          original_filename?: string;
+          file_hash?: string;
+          sheet_names?: string[];
+          period_start?: string | null;
+          period_end?: string | null;
+          record_count?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'rejection_uploads_uploaded_by_fkey';
+            columns: ['uploaded_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
+
+      rejection_records: {
+        Row: {
+          id: string;
+          upload_id: string;
+          line_no: number;
+          line_label: string | null;
+          production_date: string;
+          style_number: string | null;
+          order_qty: number | null;
+          reject_qty: number;
+          reject_pct: number | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          upload_id: string;
+          line_no: number;
+          line_label?: string | null;
+          production_date: string;
+          style_number?: string | null;
+          order_qty?: number | null;
+          reject_qty?: number;
+          reject_pct?: number | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          upload_id?: string;
+          line_no?: number;
+          line_label?: string | null;
+          production_date?: string;
+          style_number?: string | null;
+          order_qty?: number | null;
+          reject_qty?: number;
+          reject_pct?: number | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'rejection_records_upload_id_fkey';
+            columns: ['upload_id'];
+            isOneToOne: false;
+            referencedRelation: 'rejection_uploads';
+            referencedColumns: ['id'];
+          }
+        ];
+      };
+
       hr_attendance: {
         Row: {
           id: string;

@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { ColumnMapping, ImportRow, MappableField, RowIssue } from '@/types/domain';
-import { detectColumns, mappedFields } from './columnDetection';
+import { detectColumns, mappedFields, namesForeignFigure } from './columnDetection';
 import {
   analyseWorkbook, cellText, columnLetter, lineFromHeading, lineFromLabel, norm, type SheetLayout
 } from './layout';
@@ -173,6 +173,73 @@ export interface ValidationResult {
  * sheet that records output but not a plan still imports, with a target of 0 -
  * and the line may come from a band heading or a tab name instead of a column.
  */
+/**
+ * Reports the factory produces that this importer has nowhere to put.
+ *
+ * Recognising one by name is the difference between "no column is mapped to
+ * Order number" — which reads as a mapping the user forgot — and "this is a
+ * rejection report, and there is no rejection table". The second is the truth,
+ * and it tells them what to ask the developer for.
+ *
+ * Matched against the normalised header text, so "REJECT QTY", "Reject Qty" and
+ * "REJECTQTY" all answer to the same entry.
+ */
+const UNSUPPORTED_SHAPES: { name: string; figure: string; pattern: RegExp }[] = [
+  { name: 'rejection report', figure: 'rejected pieces',
+    pattern: /^(reject|rejection|rejected)(qty|pcs|quantity|nos?)?$/ },
+  { name: 'wastage report', figure: 'wasted or scrapped pieces',
+    pattern: /^(waste|wastage|scrap)(qty|pcs|quantity)?$/ },
+  { name: 'cutting report', figure: 'pieces cut',
+    pattern: /^(cut|cutting)(qty|pcs|quantity|output)?$/ },
+  { name: 'shipment report', figure: 'pieces shipped',
+    pattern: /^(shipped|shipment|dispatch|dispatched|delivered)(qty|pcs|quantity)?$/ },
+  { name: 'alteration report', figure: 'pieces sent back for alteration',
+    pattern: /^(alter|alteration|rework|repair)(qty|pcs|quantity)?$/ }
+];
+
+export interface WorkbookDiagnosis {
+  /** Required fields no column in this workbook holds. Empty means importable. */
+  missing: MappableField[];
+  /** Plain names for those fields, ready to print. */
+  missingNames: string[];
+  /** The distinct headers the workbook does carry, in sheet order. */
+  headers: string[];
+  /** Headers naming a figure the production table has no column for. */
+  foreignHeaders: string[];
+  /** A recognised-but-unsupported report shape, when the headers name one. */
+  shape: { name: string; figure: string } | null;
+}
+
+/**
+ * Why a workbook cannot be imported, in terms the person holding it can act on.
+ *
+ * The Map step can always be opened by hand, so this is not a lock — it is the
+ * answer to "why is every dropdown saying Not imported". Before it existed, a
+ * workbook with no importable column parked the user on the mapping screen with
+ * a disabled button and a one-line complaint about a single field, which is a
+ * dead end: no amount of choosing from those dropdowns could produce a record,
+ * because the columns the production table needs are not in the file.
+ */
+export function diagnose(parsed: ParsedWorkbook, mappings: ColumnMapping[]): WorkbookDiagnosis {
+  const missing = blockingFields(parsed, mappings);
+  const headers = [...new Set(parsed.headers.filter((h) => h.trim().length > 0))];
+  const foreignHeaders = headers.filter(namesForeignFigure);
+
+  const shape = UNSUPPORTED_SHAPES.find((candidate) =>
+    parsed.headers.some((h) => candidate.pattern.test(normaliseHeader(h)))) ?? null;
+
+  return {
+    missing,
+    missingNames: missing.map((f) => FIELD_NAME[f]),
+    headers,
+    foreignHeaders,
+    shape: shape ? { name: shape.name, figure: shape.figure } : null
+  };
+}
+
+const normaliseHeader = (header: string): string =>
+  header.toLowerCase().replace(/[\s_\-./\\%#()'’,:]+/g, '').trim();
+
 export function blockingFields(parsed: ParsedWorkbook, mappings: ColumnMapping[]): MappableField[] {
   const mapped = mappedFields(mappings);
   const missing: MappableField[] = [];

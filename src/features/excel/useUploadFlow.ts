@@ -2,7 +2,10 @@ import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ColumnMapping, ScanResult } from '@/types/domain';
 import { friendlyError } from '@/lib/errors';
-import { parseWorkbook, validateRows, blockingFields, type ParsedWorkbook } from './parseWorkbook';
+import {
+  parseWorkbook, validateRows, blockingFields, diagnose,
+  type ParsedWorkbook, type WorkbookDiagnosis
+} from './parseWorkbook';
 import { hashFile } from './hash';
 import { missingRequired } from './columnDetection';
 import { importWorkbook, validateFile, type ImportResult, type DuplicateResult } from './importService';
@@ -14,13 +17,19 @@ import { tryParseHrFile, type HrParseResult } from '@/features/hr/parseHr';
 import { importHrRows, type SheetImportResult } from '@/features/hr/importHr';
 import { tryParsePlanFile, type PlanParseResult } from '@/features/loading/parsePlan';
 import { importPlanRows } from '@/features/loading/importPlan';
+import { tryParseRejectionFile, type RejectionParseResult } from '@/features/rejection/parseRejection';
+import { importRejection, type RejectionImportResult } from '@/features/rejection/importRejection';
 
 export type FlowStep =
   | 'select' | 'scanning' | 'duplicate' | 'mapping' | 'preview' | 'importing' | 'done'
+  // a workbook the production table has no columns for: it stops here and says so
+  | 'unsupported'
   // the quality reports take their own preview screen: they have no columns to map
   | 'quality' | 'qualityDuplicate' | 'qualityDone'
   // and so do the two sheets that are upserted rather than versioned
-  | 'sheet' | 'sheetDone';
+  | 'sheet' | 'sheetDone'
+  // the rejection report keeps its own tables, so it keeps its own three screens
+  | 'rejection' | 'rejectionDuplicate' | 'rejectionDone';
 
 export interface ScanStage { label: string; detail: string; }
 
@@ -51,6 +60,11 @@ interface FlowState {
   /** An HR attendance sheet or a loading plan, whichever was recognised. */
   sheet: HrParseResult | PlanParseResult | null;
   sheetResult: SheetImportResult | null;
+  /** Why the workbook cannot be imported, when it cannot. */
+  diagnosis: WorkbookDiagnosis | null;
+  rejection: RejectionParseResult | null;
+  rejectionResult: RejectionImportResult | null;
+  rejectionDuplicate: { id: string; original_filename: string; created_at: string } | null;
   error: string;
 }
 
@@ -58,7 +72,8 @@ const INITIAL: FlowState = {
   step: 'select', file: null, fileHash: '', parsed: null, scan: null, mappings: [],
   stageIndex: 0, importPercent: 0, result: null, duplicate: null,
   quality: null, qualityResult: null, qualityDuplicate: null,
-  sheet: null, sheetResult: null, error: ''
+  sheet: null, sheetResult: null, diagnosis: null,
+  rejection: null, rejectionResult: null, rejectionDuplicate: null, error: ''
 };
 
 export function useUploadFlow() {
@@ -106,6 +121,17 @@ export function useUploadFlow() {
         return;
       }
 
+      // Rejection is recognised by a column no other report here carries, so it
+      // sits after quality rather than before it: quality answers to sheet names,
+      // and a rejection workbook that happened to tab its lines "LINE 01" would
+      // otherwise be claimed by whichever test ran first. This one is the narrower
+      // of the two and so goes second, where it can only pick up what quality left.
+      const rejection = await tryParseRejectionFile(file);
+      if (rejection) {
+        setState((s) => ({ ...s, stageIndex: SCAN_STAGES.length, rejection, step: 'rejection' }));
+        return;
+      }
+
       const parsed = await parseWorkbook(file);
       setState((s) => ({ ...s, stageIndex: 4, parsed, mappings: parsed.mappings }));
 
@@ -116,16 +142,26 @@ export function useUploadFlow() {
         mappings: parsed.mappings, rows, warnings, errors
       };
 
-      // The user is sent to the Map step whenever the sheet is not fully
+      // Three outcomes, and the workbook decides which.
+      //
+      // When a field the importer cannot proceed without has no column at all,
+      // the Map step is a dead end — every dropdown offers the same columns the
+      // scan already rejected, and no choice among them produces a record. That
+      // case gets its own screen saying so, with the manual mapper still one
+      // click away for a sheet that merely names its columns unusually.
+      //
+      // Otherwise the user is sent to Map whenever the sheet is not fully
       // understood, so a guess is confirmed before anything is written.
+      const diagnosis = diagnose(parsed, parsed.mappings);
       const needsMapping =
-        blockingFields(parsed, parsed.mappings).length > 0 ||
         missingRequired(parsed.mappings).length > 0 ||
         parsed.mappings.some((m) => m.confidence === 'low');
 
       setState((s) => ({
-        ...s, stageIndex: SCAN_STAGES.length, scan,
-        step: needsMapping ? 'mapping' : 'preview'
+        ...s, stageIndex: SCAN_STAGES.length, scan, diagnosis,
+        step: diagnosis.missing.length > 0
+          ? 'unsupported'
+          : needsMapping ? 'mapping' : 'preview'
       }));
     } catch (err) {
       setState((s) => ({ ...s, step: 'select', error: friendlyError(err) }));
@@ -141,6 +177,19 @@ export function useUploadFlow() {
       mappings: s.mappings.map((m, i) =>
         i === index ? { ...m, field, confidence: field ? 'high' : 'unmapped' } : m)
     }));
+  }, []);
+
+  /**
+   * Open the mapper anyway, from the unsupported screen.
+   *
+   * A workbook can be importable and still fail the scan — a factory that heads
+   * its produced column "O/P" defeats every synonym in the list. Telling that
+   * user the file is unsupported and leaving them no way forward would be worse
+   * than the dead end this replaced, so the door stays open; it is just no longer
+   * the first thing they walk into.
+   */
+  const mapAnyway = useCallback(() => {
+    setState((s) => (s.parsed ? { ...s, step: 'mapping' } : s));
   }, []);
 
   const confirmMapping = useCallback(() => {
@@ -222,6 +271,37 @@ export function useUploadFlow() {
     }
   }, [state, profile, queryClient]);
 
+  const runRejectionImport = useCallback(async (allowDuplicate = false) => {
+    const { file, fileHash, rejection } = state;
+    if (!file || !rejection) return;
+    if (!profile) {
+      setState((s) => ({ ...s, error: 'Your profile could not be resolved, so the import has no owner.' }));
+      return;
+    }
+
+    setState((s) => ({ ...s, step: 'importing', importPercent: 20, error: '' }));
+    const tick = setInterval(
+      () => setState((s) => ({ ...s, importPercent: Math.min(s.importPercent + 9, 92) })),
+      260
+    );
+
+    try {
+      const response = await importRejection(rejection, file, fileHash, profile.id, { allowDuplicate });
+      if ('duplicate' in response) {
+        setState((s) => ({ ...s, step: 'rejectionDuplicate', rejectionDuplicate: response.previous }));
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: ['rejection'] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      await queryClient.invalidateQueries({ queryKey: ['lines'] });
+      setState((s) => ({ ...s, step: 'rejectionDone', importPercent: 100, rejectionResult: response }));
+    } catch (err) {
+      setState((s) => ({ ...s, step: 'rejection', error: friendlyError(err) }));
+    } finally {
+      clearInterval(tick);
+    }
+  }, [state, profile, queryClient]);
+
   /**
    * HR and loading-plan sheets are upserted on their own natural key, so there is
    * no duplicate screen and no version chain here: uploading a revised sheet is
@@ -257,7 +337,7 @@ export function useUploadFlow() {
   const blocking = state.parsed ? blockingFields(state.parsed, state.mappings) : [];
 
   return {
-    state, blocking, selectFile, setMapping, confirmMapping,
-    runImport, runQualityImport, runSheetImport, reset
+    state, blocking, selectFile, setMapping, confirmMapping, mapAnyway,
+    runImport, runQualityImport, runSheetImport, runRejectionImport, reset
   };
 }

@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { monthEnd, monthStart, today as todayISO, withinSpan } from './period';
+import { addMonths, monthEnd, monthStart, today as todayISO, withinSpan } from './period';
 import type { QualitySpan } from './period';
 import { STAGE_LABEL } from './types';
 import type { QualityReportKind, QualityStage } from './types';
@@ -277,7 +277,46 @@ export interface FinalInspectionMonth {
   passPct: number | null;
 }
 
-export interface FinalInspectionSummary {
+/** One line's final-inspection result over the selected window. */
+export interface FinalLineStat {
+  key: string;
+  lineNo: number | null;
+  label: string;
+  /**
+   * How many final inspections the reports record for this line — one per line
+   * per day the gate was run, not a piece count. This is the figure the client
+   * calls "no of inspections", and it is deliberately separate from the pieces
+   * those inspections covered.
+   */
+  inspections: number;
+  /** Pieces that went through the gate. */
+  checked: number;
+  pass: number;
+  fail: number;
+  passPct: number | null;
+  /** The exact complement of passPct, so the two always read to 100%. */
+  failPct: number | null;
+  status: FinalStatus;
+}
+
+/** One bucket of the final-inspection run: a day, or a month. */
+export interface FinalPeriodPoint {
+  date: string;
+  inspections: number;
+  checked: number;
+  pass: number;
+  fail: number;
+  passPct: number | null;
+}
+
+/**
+ * The pre-shipment audit from the monthly inspection report. It is kept apart
+ * from the line figures above rather than added to them: one audit covers the
+ * styles shipping that month, and its "1st time pass rate" counts styles that
+ * cleared at the first attempt while the counts beside it are pieces. Summing a
+ * styles rate with a piece rate produces a number that means nothing.
+ */
+export interface FinalAudit {
   hasData: boolean;
   months: FinalInspectionMonth[];
   /** The newest month carrying figures — the verdict the client reads first. */
@@ -286,6 +325,44 @@ export interface FinalInspectionSummary {
   defects: number;
   /** Defects per hundred pieces audited, across every month shown. */
   defectPct: number | null;
+}
+
+export interface FinalInspectionSummary {
+  hasData: boolean;
+  /** The window these figures cover — the same day, week or month as the page. */
+  span: QualitySpan;
+  /** Daily where the reports date the final gate by day, monthly otherwise. */
+  grain: QualityGrain;
+  /**
+   * True when the reports carry the final gate line by line, which is what lets
+   * the table below be read per line. False when the only final-inspection data
+   * is the factory-wide monthly audit, and there is nothing to attribute.
+   */
+  lineWise: boolean;
+
+  /** Totals — the "ttl summary" row. */
+  inspections: number;
+  checked: number;
+  pass: number;
+  fail: number;
+  passPct: number | null;
+  failPct: number | null;
+
+  lines: FinalLineStat[];
+  /** Day by day, or month by month, over the selected window. */
+  periods: FinalPeriodPoint[];
+  topDefects: DefectStat[];
+  /**
+   * The months the defect breakdown was read from. The final-inspection defect
+   * columns are only ever filed monthly, so a day or a week is answered with the
+   * month it falls in — and the caption has to say so rather than let a month of
+   * findings sit under a Tuesday's heading.
+   */
+  defectMonths: string[];
+  /** True when the defect breakdown covers more of the calendar than the window. */
+  defectsWiderThanSpan: boolean;
+
+  audit: FinalAudit;
 }
 
 /**
@@ -642,17 +719,24 @@ export function buildQualityMatrix(
   const dailyDefects = dailyIn(data.defects, span);
   const defectRows = dailyDefects.length > 0 ? dailyDefects : monthlyIn(data.defects, span);
 
-  // End line and appearance, on whichever basis is showing. A monthly second
-  // summary is one column per category and names no gate at all; filtering that
-  // to two gates would empty the panel, so a report that never names a gate is
-  // charted whole and the caption says so.
-  const namesGates = defectRows.some((d) => defectStage(d.category) != null);
-  const scoped = namesGates
-    ? defectRows.filter((d) => {
-        const stage = defectStage(d.category);
-        return stage != null && DEFECT_STAGES.includes(stage);
-      })
-    : defectRows;
+  // End line and appearance, on whichever basis is showing — decided row by row
+  // rather than for the whole window at once.
+  //
+  // Two reports can land in the same month and disagree about whether they name a
+  // gate: the monthly second summary is one column per category and names none,
+  // while the monthly inspection report's categories are all tagged "(Final)" by
+  // the importer. Judging the window as a whole meant one of those decided for
+  // the other — either the untagged summary was filtered away to nothing, or the
+  // shipping-audit findings were charted here as sewing-floor defects. So a row
+  // that names a floor gate is counted, a row that names no gate at all is
+  // counted (there is nothing better to do with it, and the caption says so), and
+  // a row that names some other gate — final, AQL, in line — is left to the panel
+  // that reports on it.
+  const scoped = defectRows.filter((d) => {
+    const stage = defectStage(d.category);
+    return stage == null || DEFECT_STAGES.includes(stage);
+  });
+  const namesGates = scoped.some((d) => defectStage(d.category) != null);
 
   const perLine = scoped.filter((d) => !d.is_factory);
   const chosen = perLine.length > 0 ? perLine : scoped;
@@ -689,7 +773,7 @@ export function buildQualityMatrix(
   }
 
   const aql = stageMap.get('aql');
-  const finalInspection = buildFinalInspection(data.finals, span);
+  const finalInspection = buildFinalInspection(data, span, threshold);
 
   return {
     // A factory that files only the pre-shipment inspection report still has
@@ -723,26 +807,207 @@ export function buildQualityMatrix(
 const rate = (checked: number, defects: number): number | null =>
   checked > 0 ? Math.round(((checked - defects) / checked) * 10_000) / 100 : null;
 
+/** The first of every month the window touches, oldest first. */
+function monthsSpanned(span: QualitySpan): string[] {
+  const out: string[] = [];
+  const last = monthStart(span.to);
+  for (let m = monthStart(span.from); m <= last; m = addMonths(m, 1)) out.push(m);
+  return out;
+}
+
 /**
- * The pre-shipment final inspection, month by month.
+ * Pass and fail for one final-inspection row.
  *
- * It is never folded into the line figures: one audit covers the styles shipping
- * that month rather than the line that sewed them, and adding a factory-level
- * audit to per-line stage totals would double-count the same garments. The report
- * has no daily grain, so a day or a week is answered with the month it falls in
- * rather than with nothing — the audit is a fact about that month however narrow
- * the window over it happens to be.
+ * The KPI sheets fill in CHECKED / PASS / FAIL, but not always all three — a
+ * typist who fills PASS leaves FAIL blank and the other way round — so whichever
+ * half is present decides the other. Neither present means the gate passed
+ * everything it checked, which is what the sheet says by leaving the column
+ * empty. Both are clamped into the checked quantity: a keying error reporting
+ * more failures than pieces must not put a negative pass count on screen.
+ */
+function passFail(r: { checked_qty: number | null; pass_qty: number | null; defect_qty: number | null }) {
+  const checked = r.checked_qty ?? 0;
+  const raw = r.defect_qty ?? (r.pass_qty != null ? checked - r.pass_qty : 0);
+  const fail = Math.min(Math.max(raw, 0), checked);
+  return { checked, pass: checked - fail, fail };
+}
+
+const pct = (part: number, whole: number): number | null =>
+  whole > 0 ? Math.round((part / whole) * 10_000) / 100 : null;
+
+/**
+ * The final inspection, over the window the page is showing.
+ *
+ * The client reads this gate the way they read every other one — daily, weekly or
+ * monthly, line by line, with a pass and a fail count on each row and a total
+ * underneath. That is what this builds, from the per-line FINAL block the KPI and
+ * daily sheets carry. The previous version could not: it read only the
+ * factory-wide monthly audit, so a week never had an answer and no line ever had
+ * a figure of its own.
+ *
+ * Two things are genuinely monthly and are kept monthly rather than spread across
+ * days:
+ *
+ *  - The pre-shipment audit, whose "1st time pass rate" counts styles, not
+ *    pieces. It stays in `audit`, beside the piece figures and never added into
+ *    them.
+ *  - The defect breakdown, which the monthly inspection report files one column
+ *    per category per month. A day or a week is answered with the month it falls
+ *    in, and `defectMonths` records which month that was so the caption can say.
+ *
+ * Final rows are still never added into the floor totals elsewhere on the page —
+ * those are In line, End line and Appearance. Final inspection judges goods
+ * already counted at all three, so adding it in would count the same garments
+ * twice.
  */
 export function buildFinalInspection(
-  rows: FinalInspectionRow[],
-  span: QualitySpan | null
+  data: QualityRecords,
+  span: QualitySpan,
+  threshold: number
 ): FinalInspectionSummary {
-  const first = span ? monthStart(span.from) : null;
-  const last = span ? monthStart(span.to) : null;
+  // data.inspections excludes the sheets' Factory roll-up rows, so what is left
+  // at this stage is the per-line final gate and nothing else.
+  const finalRows = data.inspections.filter((r) => r.stage === 'final');
+  const daily = dailyIn(finalRows, span);
+  const monthly = monthlyIn(finalRows, span);
+  // Daily wins wherever it exists, exactly as the rest of the page decides it: a
+  // monthly summary already contains the days inside it, and summing both would
+  // count every piece twice.
+  const grain: QualityGrain = daily.length > 0 || monthly.length === 0 ? 'daily' : 'monthly';
+  const rows = grain === 'daily' ? daily : monthly;
+
+  let inspections = 0;
+  let checked = 0;
+  let pass = 0;
+  let fail = 0;
+
+  // The roster comes first, so a line the factory runs but did not final-inspect
+  // in this window is still a row reading "not inspected" — a different fact from
+  // a line that failed, and the one a planner needs to see.
+  const lineMap = new Map<string, FinalLineStat>();
+  for (const ref of data.lines) {
+    lineMap.set(String(ref.lineNo), {
+      key: String(ref.lineNo), lineNo: ref.lineNo, label: ref.label,
+      inspections: 0, checked: 0, pass: 0, fail: 0,
+      passPct: null, failPct: null, status: 'not_inspected'
+    });
+  }
+
+  const periodMap = new Map<string, { inspections: number; checked: number; pass: number; fail: number }>();
+
+  for (const r of rows) {
+    const v = passFail(r);
+    if (v.checked <= 0) continue;
+
+    inspections += 1;
+    checked += v.checked;
+    pass += v.pass;
+    fail += v.fail;
+
+    const key = r.line_no != null ? String(r.line_no) : (r.line_label ?? '—');
+    const line = lineMap.get(key) ?? {
+      key, lineNo: r.line_no, label: r.line_label ?? `Line ${key}`,
+      inspections: 0, checked: 0, pass: 0, fail: 0,
+      passPct: null, failPct: null, status: 'not_inspected' as FinalStatus
+    };
+    line.inspections += 1;
+    line.checked += v.checked;
+    line.pass += v.pass;
+    line.fail += v.fail;
+    lineMap.set(key, line);
+
+    const at = pointOf(r, grain);
+    const bucket = periodMap.get(at) ?? { inspections: 0, checked: 0, pass: 0, fail: 0 };
+    periodMap.set(at, {
+      inspections: bucket.inspections + 1,
+      checked: bucket.checked + v.checked,
+      pass: bucket.pass + v.pass,
+      fail: bucket.fail + v.fail
+    });
+  }
+
+  const lines = [...lineMap.values()].map((line) => {
+    const passPct = pct(line.pass, line.checked);
+    return {
+      ...line,
+      passPct,
+      failPct: pct(line.fail, line.checked),
+      status: (passPct == null
+        ? 'not_inspected'
+        : passPct >= threshold ? 'passed' : 'below') as FinalStatus
+    };
+  }).sort(byLineOrder);
+
+  const periods = [...periodMap.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, v]) => ({
+      date, inspections: v.inspections, checked: v.checked, pass: v.pass, fail: v.fail,
+      passPct: pct(v.pass, v.checked)
+    }));
+
+  // ---- Defects counted at this gate, and only at this gate ----------------
+  // The importer writes the gate into the category ("Fabric (Final)"), which is
+  // what keeps a shipping-audit finding out of the sewing-floor breakdown beside
+  // it. Per-line rows are preferred; the monthly inspection report files its
+  // categories at factory level, so those are a fallback rather than an addition
+  // — counting both would double every category it names.
+  const finalDefects = data.defects.filter((d) => defectStage(d.category) === 'final');
+  const dailyDefects = dailyIn(finalDefects, span);
+  const months = monthsSpanned(span);
+  const monthlyDefects = finalDefects.filter(
+    (d) => d.inspection_date == null && d.period_month != null && months.includes(d.period_month)
+  );
+  const defectRows = dailyDefects.length > 0 ? dailyDefects : monthlyDefects;
+
+  const catTotals = new Map<string, number>();
+  for (const d of defectRows) {
+    const name = defectCategory(d.category);
+    catTotals.set(name, (catTotals.get(name) ?? 0) + (d.qty ?? 0));
+  }
+  const topDefects = [...catTotals.entries()]
+    .map(([category, qty]) => ({ category, qty }))
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 5);
+
+  const defectMonths = dailyDefects.length > 0
+    ? []
+    : [...new Set(monthlyDefects.map((d) => d.period_month!))].sort();
+
+  const audit = buildFinalAudit(data.finals, months);
+
+  return {
+    hasData: inspections > 0 || topDefects.length > 0 || audit.hasData,
+    span,
+    grain,
+    lineWise: inspections > 0,
+    inspections,
+    checked,
+    pass,
+    fail,
+    passPct: pct(pass, checked),
+    failPct: pct(fail, checked),
+    lines,
+    periods,
+    topDefects,
+    defectMonths,
+    // A month-wide window is exactly the grain the breakdown is filed at, so this
+    // is only worth flagging when a day or a week borrowed a whole month.
+    defectsWiderThanSpan: span.range !== 'month' && defectMonths.length > 0,
+    audit
+  };
+}
+
+/**
+ * The pre-shipment audit, month by month, over the months the window touches.
+ *
+ * It is never folded into the line figures above: one audit covers the styles
+ * shipping that month rather than the line that sewed them, and adding a
+ * factory-level audit to per-line totals would count the same garments twice.
+ */
+function buildFinalAudit(rows: FinalInspectionRow[], months: string[]): FinalAudit {
   const byMonth = new Map<string, { checked: number; defects: number; passPct: number | null }>();
   for (const r of rows) {
-    if (!r.period_month) continue;
-    if (first && last && (r.period_month < first || r.period_month > last)) continue;
+    if (!r.period_month || !months.includes(r.period_month)) continue;
     const acc = byMonth.get(r.period_month) ?? { checked: 0, defects: 0, passPct: null };
     acc.checked += r.checked_qty ?? 0;
     acc.defects += r.defect_qty ?? 0;
@@ -753,21 +1018,21 @@ export function buildFinalInspection(
     byMonth.set(r.period_month, acc);
   }
 
-  const months = [...byMonth.entries()]
+  const list = [...byMonth.entries()]
     .map(([m, v]) => ({ month: m, checked: v.checked, defects: v.defects, passPct: v.passPct }))
     .sort((a, b) => a.month.localeCompare(b.month));
 
-  const withFigures = months.filter((m) => m.checked > 0 || m.defects > 0 || m.passPct != null);
-  const checked = months.reduce((sum, m) => sum + m.checked, 0);
-  const defects = months.reduce((sum, m) => sum + m.defects, 0);
+  const withFigures = list.filter((m) => m.checked > 0 || m.defects > 0 || m.passPct != null);
+  const checked = list.reduce((sum, m) => sum + m.checked, 0);
+  const defects = list.reduce((sum, m) => sum + m.defects, 0);
 
   return {
     hasData: withFigures.length > 0,
-    months,
+    months: list,
     latest: withFigures[withFigures.length - 1] ?? null,
     checked,
     defects,
-    defectPct: checked > 0 ? Math.round((defects / checked) * 10_000) / 100 : null
+    defectPct: pct(defects, checked)
   };
 }
 

@@ -335,6 +335,93 @@ input:focus-visible {
   list-style: none; margin: 12px 0 0; padding: 0;
   display: flex; flex-wrap: wrap; gap: 6px 16px;
 }
+
+/* ---------- defect matrix ----------
+   A grid of bars: rows are defect categories, columns are lines, every cell
+   starts at the same edge so a row can be read straight across. It is marked up
+   as a real table because it is one -- that gives row and column headers to a
+   screen reader for free, and makes the figures selectable and copyable, which
+   an SVG chart never is. */
+/* `table-layout: fixed` is load-bearing, not tidiness. The bar track is a
+   flex child with `min-width: 0`, so under automatic layout it contributes
+   nothing to its column's intrinsic width: the columns would size to the printed
+   number alone and every bar would collapse to a few pixels. Fixed layout gives
+   the corner its declared width and splits the remainder evenly, so a column is
+   wide enough to draw in and a bar of the same value is the same length in all
+   of them. */
+.dmx { width: 100%; border-collapse: collapse; table-layout: fixed; }
+
+/* A sentence, so it is laid out as one. As a flex container every text run
+   between the <strong>s becomes its own flex item, which wraps the line in the
+   wrong places and spaces the words unevenly. */
+.dmx__lead {
+  margin: 0 0 16px; font-size: 13px; line-height: 1.65; color: var(--text-muted);
+}
+.dmx__lead strong { color: var(--text); font-weight: 600; }
+
+.dmx__chip {
+  display: inline-block; vertical-align: middle;
+  width: 9px; height: 9px; border-radius: 3px; flex: none;
+  margin-right: 8px; position: relative; top: -1px;
+}
+
+.dmx__corner, .dmx__colhead {
+  font: 600 11px var(--font-body); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-muted); padding: 0 0 10px; text-align: left;
+}
+.dmx__colhead { text-align: right; padding-left: 14px; }
+.dmx__corner  { width: 172px; }
+
+/* Deliberately not `display: flex` on the <th> itself: that takes the element
+   out of table layout altogether and collapses the column it heads. The flex box
+   is a span inside it. */
+.dmx__rowhead {
+  font: 500 12.5px var(--font-body); color: var(--text);
+  text-align: left; padding: 0 14px 0 0; height: 38px;
+}
+.dmx__rowlabel { display: flex; align-items: center; min-width: 0; }
+.dmx__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dmx__cell { padding: 0 0 0 14px; vertical-align: middle; }
+.dmx tbody tr { border-top: 1px solid var(--border-soft); }
+.dmx tbody tr:hover { background: var(--surface-muted); }
+
+.dmx__mark { display: flex; align-items: center; gap: 8px; }
+
+/* The track is the cell's own width, so a bar of the same value is the same
+   length in every column -- which is the whole point of laying this out as a
+   grid rather than a stack. */
+.dmx__track {
+  flex: 1 1 auto; min-width: 0; height: 8px; border-radius: 4px;
+  background: var(--border-soft);
+}
+.dmx__bar { display: block; height: 100%; border-radius: 4px; }
+
+.dmx__value {
+  flex: none; min-width: 30px; text-align: right;
+  font-size: 12.5px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.dmx__value--bold { color: var(--text); font-weight: 600; }
+.dmx__zero {
+  display: block; text-align: right; color: var(--text-faint); font-size: 13px;
+}
+
+/* The largest cell in the grid. A ring rather than a different colour: colour is
+   already spoken for by the defect's identity, and re-tinting the peak would
+   break the one-hue-per-row rule the rest of the grid depends on. */
+.dmx__mark.is-peak .dmx__value { color: var(--text); font-weight: 700; }
+.dmx__mark.is-peak .dmx__track {
+  outline: 1.5px solid var(--text-faint); outline-offset: 3px; border-radius: 4px;
+}
+
+.dmx__total { border-left: 1px solid var(--border-soft); padding-left: 16px; }
+.dmx tfoot td, .dmx tfoot th { border-top: 2px solid var(--border); height: 40px; }
+.dmx tfoot tr:hover { background: none; }
+
+@media (max-width: 640px) {
+  .dmx__corner { width: 120px; }
+  .dmx__rowhead { font-size: 12px; }
+}
 .legend--col { flex-direction: column; gap: 7px; flex: 1 1 170px; margin: 0; min-width: 0; }
 .legend__item { display: flex; align-items: center; gap: 7px; font-size: 12px; min-width: 0; }
 .legend__swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
@@ -367,6 +454,12 @@ input:focus-visible {
 }
 .table td { padding: 12px 14px 12px 0; border-top: 1px solid var(--border-soft); }
 .table tbody tr:hover { background: var(--surface-muted); }
+/* A totals row. `border-collapse` merges the foot's top border with the last
+   body row's, so the separation has to be won on width rather than added as a
+   second line — and the row does not light up on hover, because there is no
+   line for it to take you to. */
+.table tfoot td { border-top: 2px solid var(--border); font-weight: 700; }
+.table tfoot tr:hover { background: none; }
 .num { text-align: right; }
 /* `.table th` sets its own alignment and outweighs `.num` on specificity, so a
    numeric heading has to claim the right edge again — otherwise every heading
