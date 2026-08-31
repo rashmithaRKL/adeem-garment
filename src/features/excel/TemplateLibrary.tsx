@@ -3,8 +3,8 @@ import { Card } from '@/components/Card';
 import { friendlyError } from '@/lib/errors';
 import { downloadFor } from './templates';
 import {
-  MODULE_NOTE, MODULE_ORDER, REQUIREMENT_LABEL, TEMPLATES, templatesOf,
-  type Requirement, type UploadTemplate
+  MODULE_NOTE, MODULE_ORDER, REQUIREMENT_LABEL, templatesOf,
+  type Requirement, type TemplateModule, type UploadTemplate
 } from './templateCatalog';
 
 /**
@@ -126,27 +126,44 @@ function TemplateEntry({ template }: { template: UploadTemplate }) {
   );
 }
 
-export function TemplateLibrary() {
-  return (
-    <Card title="What you can upload" style={{ marginTop: 16 }}
-      aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-        {TEMPLATES.length} reports · one workbook each
-      </span>}>
-      <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--text-muted)' }}>
-        Each report has its own template, because each one is kept by different people on
-        different days. Download the one you need, fill in the sheet, and drop it above — the
-        kind is recognised from the headers, so a file never has to be labelled. Your own
-        sheets are still read as they are: the columns below are matched by their common
-        spellings, and a template is only the layout that is known to work.
-      </p>
+const DEFAULT_INTRO = 'Each report has its own template, because each one is kept by different '
+  + 'people on different days. Download the one you need, fill in the shaded table, and drop it '
+  + 'above — the kind is recognised from the headers, so a file never has to be labelled. Your '
+  + 'own sheets are still read as they are: a template is only the layout known to work.';
+
+export function TemplateLibrary({
+  modules = MODULE_ORDER,
+  title = 'What you can upload',
+  intro = DEFAULT_INTRO,
+  collapsible = false,
+  showModuleHeadings = modules.length > 1
+}: {
+  /** Which parts of the factory to list. Defaults to all of them. */
+  modules?: TemplateModule[];
+  title?: string;
+  intro?: string;
+  /** Folds the whole card away behind one line — for screens that are not the
+   *  Upload screen, where the templates are useful but not the point. */
+  collapsible?: boolean;
+  showModuleHeadings?: boolean;
+}) {
+  const count = modules.reduce((n, module) => n + templatesOf(module).length, 0);
+
+  const body = (
+    <>
+      <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--text-muted)' }}>{intro}</p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-        {MODULE_ORDER.map((module) => (
+        {modules.map((module) => (
           <section key={module}>
-            <h3 className="section-heading" style={{ margin: '0 0 2px' }}>{module}</h3>
-            <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--text-faint)' }}>
-              {MODULE_NOTE[module]}
-            </p>
+            {showModuleHeadings && (
+              <>
+                <h3 className="section-heading" style={{ margin: '0 0 2px' }}>{module}</h3>
+                <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--text-faint)' }}>
+                  {MODULE_NOTE[module]}
+                </p>
+              </>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {templatesOf(module).map((template) => (
                 <TemplateEntry key={template.id} template={template} />
@@ -157,10 +174,33 @@ export function TemplateLibrary() {
       </div>
 
       <p style={{ margin: '18px 0 0', fontSize: 12.5, color: 'var(--text-faint)' }}>
-        Every template carries a second sheet, “Column guide”, describing the same columns
-        inside the file itself. It is documentation only and is never imported, so it can be
-        left in place.
+        Every template opens on a ruled table: the headings in the darker blue are the columns the
+        import cannot run without, the yellow rows are examples to type over, and the empty rows
+        below them are ready to fill in. A second sheet, “Column guide”, describes each column
+        inside the file — it is documentation only and is never imported.
       </p>
+    </>
+  );
+
+  const badge = (
+    <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
+      {count} report{count === 1 ? '' : 's'} · one workbook each
+    </span>
+  );
+
+  if (!collapsible) {
+    return <Card title={title} style={{ marginTop: 16 }} aside={badge}>{body}</Card>;
+  }
+
+  return (
+    <Card style={{ marginTop: 16 }}>
+      <details>
+        <summary style={{ cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <span className="card__title">{title}</span>
+          {badge}
+        </summary>
+        <div style={{ marginTop: 14 }}>{body}</div>
+      </details>
     </Card>
   );
 }

@@ -17,6 +17,7 @@ import {
   axisLabel, spanFor, spanLabel, today, RANGE_LABEL, type QualitySpan, type QualityRange
 } from './period';
 import { QualityPeriodPicker } from './QualityPeriodPicker';
+import { TemplateLibrary } from '@/features/excel/TemplateLibrary';
 import { STAGE_LABEL, type QualityStage } from './types';
 
 /** "In line, End line and Appearance" — the phrase every caption below needs. */
@@ -141,6 +142,18 @@ export function QualityManagementPage() {
           Pass{showRejection && ', rejection'} and final inspection are judged against
           the {EFFICIENCY_THRESHOLD}% threshold.
         </>}
+      />
+
+      {/* The five quality workbooks, where the people who keep them are. Folded
+          away by default: this is a reading screen, and the templates are what
+          someone needs on the day they are asked to start filing a new report. */}
+      <TemplateLibrary
+        modules={['Quality management']}
+        title="Quality Excel templates"
+        collapsible
+        intro={'The five quality reports this screen is built from, each with its own workbook. '
+          + 'Download one, fill in the shaded table, and upload it on the Upload Excel screen — '
+          + 'the report is recognised from its own layout, so nothing has to be labelled.'}
       />
 
       <QueryState

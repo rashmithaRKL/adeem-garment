@@ -12,8 +12,12 @@
  * onto a template — so what is written here is the shape known to work, and the
  * column tables the Upload screen shows are generated from the same entries the
  * downloads are built from. They cannot drift apart.
+ *
+ * Each sheet also carries a `style`: which rows are the title, which are the
+ * headings, which rows are examples and where the empty rows waiting to be typed
+ * into begin. The rows themselves stay exactly as the importers expect them —
+ * templates.ts only paints what is described here, and never moves a row.
  */
-import { GUIDE_SHEET } from './guideSheet';
 
 export type TemplateId =
   | 'production'
@@ -43,11 +47,43 @@ export interface TemplateColumn {
   alsoAccepted?: string[];
 }
 
+/**
+ * Where the parts of a sheet are, so it can be painted without anything having to
+ * guess. Every index is 0-based and refers to `rows` as written below.
+ */
+export interface SheetStyle {
+  /** Rows merged across the table and painted as the report's title block. */
+  title?: number[];
+  /** Stage banner rows on the quality sheets, merged over the block they head. */
+  banner?: number[];
+  /** Column heading rows. Everything freezes below the last of them. */
+  headers?: number[];
+  /** First and last row of the fillable table. */
+  data?: [number, number];
+  /** Rows carrying example figures, tinted so they read as samples to replace. */
+  examples?: number[];
+  /** Columns holding dates, percentages and whole numbers. */
+  dates?: number[];
+  percents?: number[];
+  integers?: number[];
+  /** Columns the importer cannot do without: their headings are marked. */
+  required?: number[];
+  /** Dropdown lists, by column. */
+  choices?: Record<number, string[]>;
+  /** How many columns wide the painted table is. */
+  width: number;
+  /** A second table further down — the appearance defect block. */
+  extra?: SheetStyle;
+  /** Turns the heading row into a filter row. Flat tables only. */
+  filter?: boolean;
+}
+
 export interface TemplateSheet {
   name: string;
   rows: unknown[][];
   /** Column widths, so the file is readable the moment it opens. */
   widths?: number[];
+  style: SheetStyle;
 }
 
 export interface UploadTemplate {
@@ -66,7 +102,7 @@ export interface UploadTemplate {
   fileStem: string;
   columns: TemplateColumn[];
   notes: string[];
-  /** The data sheets. The guide sheet is appended by the download itself. */
+  /** The data sheets. The guide sheet is added by the writer itself. */
   build: () => TemplateSheet[];
 }
 
@@ -91,13 +127,28 @@ const month = (offset: number): string => {
   return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 };
 
-const monthName = (offset: number): string => month(offset).split(' ')[0]!;
-
 const thisYear = (): number => new Date().getFullYear();
+
+/**
+ * The months of the current year that carry example figures: this month and the
+ * two before it, so the year-long sheets open on something recognisable and the
+ * rest of the rows are already waiting, named and empty.
+ */
+const filledMonths = (): number[] => {
+  const now = new Date().getMonth();
+  return [now - 2, now - 1, now].filter((i) => i >= 0);
+};
 
 /** Pads a banded header row out to a fixed width so the grid stays rectangular. */
 const bandRow = (width: number, cells: Record<number, unknown>): unknown[] =>
   Array.from({ length: width }, (_, i) => cells[i] ?? '');
+
+/**
+ * The empty rows below the examples. They are genuinely empty — the importers
+ * drop a row with nothing in it — and exist so the sheet opens with a ruled,
+ * obviously fillable table rather than four sample rows and a void.
+ */
+const blankRows = (count: number): unknown[][] => Array.from({ length: count }, () => []);
 
 // ---------------------------------------------------------------------------
 // Production
@@ -162,17 +213,32 @@ const production: UploadTemplate = {
     name: 'Production',
     widths: [12, 7, 12, 20, 12, 14, 10, 10, 11, 11, 13, 12, 13, 22],
     rows: [
+      ['DAILY PRODUCTION REPORT'],
+      ['One row for each order a sewing line ran that day. The yellow rows are examples — type over them or delete them. Headings in the darker blue must be filled in.'],
       ['Date', 'Line', 'Order No', 'Buyer', 'Style No', 'Product', 'Colour', 'Size',
         'Order Qty', 'Target Qty', 'Produced Qty', 'Efficiency %', 'Delivery Date', 'Remarks'],
       [day(-2), 1, 'PO-10233', 'St Anthony College', 'AU-4471', 'Shirt', 'White', '28-40',
         6400, 900, 872, 82.4, day(21), ''],
       [day(-2), 2, 'PO-10241', 'Royal Institute', 'AU-4482', 'Trouser', 'Navy', '26-38',
-        3800, 700, 654, 78.1, day(26), 'One machine down until noon'],
+        3800, 700, 654, 81.2, day(26), 'One machine down until noon'],
       [day(-1), 1, 'PO-10233', 'St Anthony College', 'AU-4471', 'Shirt', 'White', '28-40',
         6400, 900, 918, 86.9, day(21), ''],
       [day(-1), 2, 'PO-10241', 'Royal Institute', 'AU-4482', 'Trouser', 'Navy', '26-38',
-        3800, 700, 705, 83.5, day(26), '']
-    ]
+        3800, 700, 705, 83.5, day(26), ''],
+      ...blankRows(24)
+    ],
+    style: {
+      width: 14,
+      title: [0, 1],
+      headers: [2],
+      data: [3, 30],
+      examples: [3, 4, 5, 6],
+      dates: [0, 12],
+      integers: [1, 8, 9, 10],
+      percents: [11],
+      required: [1, 2, 9, 10],
+      filter: true
+    }
   }]
 };
 
@@ -203,27 +269,42 @@ const qualityLineKpi: UploadTemplate = {
     'Row 1 names the stage over each block — In line, End line, Appearance, Final, AQL — and row 2 names its three columns. Data starts on row 3.',
     'One sheet per line, named LINE 01, LINE 02, LINE 03 … Copy a sheet and rename it to add a line.',
     'A stage the line did not run that day is left blank. A zero is read as blank, so it never draws a 0% point on the charts.',
-    'A sheet for a line that has not been inspected yet still registers the line, so it appears on the Quality screens.'
+    'A sheet for a line that has not been inspected yet still registers the line, so it appears on the Quality screens.',
+    'These two rows are fixed: the importer reads the banner from row 1 and the headings from row 2, so nothing may be inserted above them.'
   ],
   build: () => {
     const width = 16;
     const banner = bandRow(width, { 1: 'IN LINE', 4: 'END LINE', 7: 'APPEARANCE', 10: 'FINAL', 13: 'AQL' });
     const sub = ['DATE', ...Array.from({ length: 5 }, () => ['CHECKED', 'PASS', 'FAIL']).flat()];
-    const widths = [12, ...Array.from({ length: 15 }, () => 10)];
+    const widths = [13, ...Array.from({ length: 15 }, () => 10)];
+    const style: SheetStyle = {
+      width,
+      banner: [0],
+      headers: [1],
+      data: [2, 21],
+      examples: [2, 3],
+      dates: [0],
+      integers: Array.from({ length: 15 }, (_, i) => i + 1),
+      required: [0, 1, 4, 7, 10, 13]
+    };
     return [
       {
         name: 'LINE 01',
         widths,
+        style,
         rows: [banner, sub,
           [day(-2), 320, 314, 6, 320, 316, 4, 300, 293, 7, 280, 277, 3, 2, 2, 0],
-          [day(-1), 340, 333, 7, 340, 337, 3, 320, 314, 6, 300, 298, 2, 2, 2, 0]]
+          [day(-1), 340, 333, 7, 340, 337, 3, 320, 314, 6, 300, 298, 2, 2, 2, 0],
+          ...blankRows(18)]
       },
       {
         name: 'LINE 02',
         widths,
+        style,
         rows: [banner, sub,
           [day(-2), 280, 271, 9, 280, 274, 6, 260, 252, 8, 240, 236, 4, 1, 1, 0],
-          [day(-1), 290, 284, 6, 290, 285, 5, 270, 265, 5, 250, 247, 3, 1, 1, 0]]
+          [day(-1), 290, 284, 6, 290, 285, 5, 270, 265, 5, 250, 247, 3, 1, 1, 0],
+          ...blankRows(18)]
       }
     ];
   }
@@ -231,6 +312,13 @@ const qualityLineKpi: UploadTemplate = {
 
 /** The four columns every stage block carries on the daily and monthly reports. */
 const STAGE_BLOCK = ['CHECK QTY', 'DEFECT QTY', 'DEFECT %', 'PASS %'];
+
+/** The defect block that sits under both reports, and the rows it occupies. */
+const DEFECT_BLOCK: unknown[][] = [
+  [],
+  ['Appearance Defect Summary'],
+  ['Line', 'Check Qty', 'Uncut Threads', 'Oil Marks', 'Shade Variation', 'Measurement', 'Stain']
+];
 
 const qualityDaily: UploadTemplate = {
   id: 'quality-daily',
@@ -244,7 +332,7 @@ const qualityDaily: UploadTemplate = {
   columns: [
     { header: 'Date :- (title block)', requirement: 'required',
       format: 'Text, e.g. "Date :- 2026-08-30"',
-      meaning: 'The report date, typed in the title block above the table. Every row is filed under it.' },
+      meaning: 'The report date, typed in the title block above the table. Every row is filed under it, so nothing else may be written on that line.' },
     { header: 'TEAM NO', requirement: 'required', format: 'Whole number, or FACTORY',
       meaning: 'The line. The FACTORY row is the roll-up and closes the stage table.',
       alsoAccepted: ['LINE'] },
@@ -266,6 +354,7 @@ const qualityDaily: UploadTemplate = {
   notes: [
     'Stage banners sit on one row, their four columns on the next, and the AQL PASS and FAIL on the row after that. Data starts below all three.',
     'The FACTORY row ends the stage table; the defect summary block below it is read separately.',
+    'To add a line, insert a row above FACTORY — the roll-up has to stay at the foot of the table.',
     'A stage with nothing in it is skipped rather than imported as zero.'
   ],
   build: () => {
@@ -288,13 +377,29 @@ const qualityDaily: UploadTemplate = {
           240, 4, 1.67, 98.33, 1, 1, 0, 100],
         ['FACTORY', '', 600, 15, 2.5, 97.5, 600, 10, 1.67, 98.33, 560, 15, 2.68, 97.32,
           520, 7, 1.35, 98.65, 3, 3, 0, 100],
-        [],
-        ['Appearance Defect Summary'],
-        ['Line', 'Check Qty', 'Uncut Threads', 'Oil Marks', 'Shade Variation', 'Measurement', 'Stain'],
+        ...DEFECT_BLOCK,
         [1, 300, 3, 1, 0, 2, 1],
         [2, 260, 4, 1, 1, 1, 1],
         ['FACTORY', 560, 7, 2, 1, 3, 2]
-      ]
+      ],
+      style: {
+        width,
+        title: [0, 1],
+        banner: [2],
+        headers: [3, 4],
+        data: [5, 7],
+        examples: [5, 6, 7],
+        percents: [4, 5, 8, 9, 12, 13, 16, 17, 21],
+        required: [0, 2, 6, 10, 14],
+        extra: {
+          width: 7,
+          title: [9],
+          headers: [10],
+          data: [11, 13],
+          examples: [11, 12, 13],
+          required: [0]
+        }
+      }
     }];
   }
 };
@@ -354,13 +459,29 @@ const qualityMonthly: UploadTemplate = {
           5600, 83, 1.48, 98.52, 38, 35, 3, 92.11, 7.89],
         ['FACTORY', 13500, 306, 2.27, 97.73, 13500, 217, 1.61, 98.39, 12700, 325, 2.56, 97.44,
           12000, 154, 1.28, 98.72, 80, 75, 5, 93.75, 6.25],
-        [],
-        ['Appearance Defect Summary'],
-        ['Line', 'Check Qty', 'Uncut Threads', 'Oil Marks', 'Shade Variation', 'Measurement', 'Stain'],
+        ...DEFECT_BLOCK,
         [1, 6800, 64, 21, 9, 44, 13],
         [2, 5900, 78, 26, 14, 41, 15],
         ['FACTORY', 12700, 142, 47, 23, 85, 28]
-      ]
+      ],
+      style: {
+        width,
+        title: [0, 1],
+        banner: [2],
+        headers: [3],
+        data: [4, 6],
+        examples: [4, 5, 6],
+        percents: [3, 4, 7, 8, 11, 12, 15, 16, 21, 22],
+        required: [0, 1, 5, 9, 13],
+        extra: {
+          width: 7,
+          title: [8],
+          headers: [9],
+          data: [10, 12],
+          examples: [10, 11, 12],
+          required: [0]
+        }
+      }
     }];
   }
 };
@@ -376,7 +497,7 @@ const qualityFinalInspection: UploadTemplate = {
   fileStem: 'final-inspection-summary-template',
   columns: [
     { header: 'Month', requirement: 'required', format: 'Month name, e.g. "August"',
-      meaning: 'The month the row covers. The year comes from the file name when the sheet does not carry one.' },
+      meaning: 'The month the row covers. All twelve are already listed — fill in the row as each month closes.' },
     { header: 'Sample Inspected', requirement: 'required', format: 'Whole number',
       meaning: 'Pieces sampled at final inspection that month.' },
     { header: 'Deffects', requirement: 'recommended', format: 'Whole number',
@@ -392,20 +513,38 @@ const qualityFinalInspection: UploadTemplate = {
   notes: [
     'Column order matters here: Month, Sample Inspected, Deffects, Qty Shipped, 1st time Pass Rate, and then the defect categories.',
     'Those categories are tagged as final-inspection defects on import, so they are never mixed with sewing-floor defects on the charts.',
-    'A month that is still all zeroes is skipped rather than charted as a collapse to 0%.',
-    'A row whose Month cell reads "Total" ends the sheet.'
+    'A month left empty is skipped rather than charted as a collapse to 0%, so the sheet can be uploaded at any point in the year.'
   ],
-  build: () => [{
-    name: 'Summary',
-    widths: [12, 16, 10, 12, 17, 10, 10, 10, 10, 13],
-    rows: [
-      ['Month', 'Sample Inspected', 'Deffects', 'Qty Shipped', '1st time Pass Rate',
-        'Fabric', 'Sewing', 'Washing', 'Packing', 'Measurement'],
-      [monthName(-2), 1250, 18, 42000, 93.75, 4, 7, 2, 3, 2],
-      [monthName(-1), 1180, 12, 39600, 95.83, 2, 5, 1, 2, 2],
-      [monthName(0), 960, 9, 31400, 96.15, 1, 4, 1, 2, 1]
-    ]
-  }]
+  build: () => {
+    const examples = filledMonths();
+    const figures: Record<number, unknown[]> = {};
+    examples.forEach((m, i) => {
+      figures[m] = [[1250, 18, 42000, 93.75, 4, 7, 2, 3, 2],
+        [1180, 12, 39600, 95.83, 2, 5, 1, 2, 2],
+        [960, 9, 31400, 96.15, 1, 4, 1, 2, 1]][i] ?? [];
+    });
+    return [{
+      name: 'Summary',
+      widths: [12, 16, 10, 12, 17, 10, 10, 10, 10, 13],
+      rows: [
+        [`FINAL INSPECTION SUMMARY ${thisYear()}`],
+        ['Month', 'Sample Inspected', 'Deffects', 'Qty Shipped', '1st time Pass Rate',
+          'Fabric', 'Sewing', 'Washing', 'Packing', 'Measurement'],
+        ...MONTHS.map((name, i) => [name, ...(figures[i] ?? [])])
+      ],
+      style: {
+        width: 10,
+        title: [0],
+        headers: [1],
+        data: [2, 13],
+        examples: examples.map((m) => m + 2),
+        integers: [1, 2, 3, 5, 6, 7, 8, 9],
+        percents: [4],
+        required: [0, 1],
+        filter: true
+      }
+    }];
+  }
 };
 
 const qualitySeconds: UploadTemplate = {
@@ -419,26 +558,41 @@ const qualitySeconds: UploadTemplate = {
   fileStem: 'monthly-second-summary-template',
   columns: [
     { header: 'Month', requirement: 'required', format: 'Month name, e.g. "August"',
-      meaning: 'The month the counts belong to. A sheet named for a year dates the rows the month names cannot.' },
+      meaning: 'The month the counts belong to. All twelve are already listed; the sheet name carries the year.' },
     { header: 'Defect categories', requirement: 'required', format: 'One column each, whole numbers',
       meaning: 'Every column after Month is a category, read by its heading. Add or rename them freely — a Total column is ignored.' }
   ],
   notes: [
     'A zero or an empty cell records nothing at all, so a half-filled year is safe to upload.',
-    'Name the sheet for its year ("Seconds 2026") when the month names alone do not say which year they are.',
+    'The sheet is named for its year ("Seconds 2026"), which is what dates the rows.',
     'One sheet per year; extra sheets in the same file are read as well.'
   ],
-  build: () => [{
-    name: `Seconds ${thisYear()}`,
-    widths: [12, 12, 12, 16, 12, 14, 12, 10],
-    rows: [
-      [`MONTHLY SECOND SUMMARY ${thisYear()}`],
-      ['Month', 'Fabric', 'Sewing', 'Shade Variation', 'Oil Marks', 'Measurement', 'Washing', 'Total'],
-      [monthName(-2), 12, 34, 8, 6, 11, 3, 74],
-      [monthName(-1), 9, 28, 5, 4, 9, 2, 57],
-      [monthName(0), 7, 21, 6, 3, 8, 1, 46]
-    ]
-  }]
+  build: () => {
+    const examples = filledMonths();
+    const figures: Record<number, unknown[]> = {};
+    examples.forEach((m, i) => {
+      figures[m] = [[12, 34, 8, 6, 11, 3, 74], [9, 28, 5, 4, 9, 2, 57], [7, 21, 6, 3, 8, 1, 46]][i] ?? [];
+    });
+    return [{
+      name: `Seconds ${thisYear()}`,
+      widths: [12, 12, 12, 16, 12, 14, 12, 10],
+      rows: [
+        [`MONTHLY SECOND SUMMARY ${thisYear()}`],
+        ['Month', 'Fabric', 'Sewing', 'Shade Variation', 'Oil Marks', 'Measurement', 'Washing', 'Total'],
+        ...MONTHS.map((name, i) => [name, ...(figures[i] ?? [])])
+      ],
+      style: {
+        width: 8,
+        title: [0],
+        headers: [1],
+        data: [2, 13],
+        examples: examples.map((m) => m + 2),
+        integers: [1, 2, 3, 4, 5, 6, 7],
+        required: [0],
+        filter: true
+      }
+    }];
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -478,14 +632,28 @@ const rejection: UploadTemplate = {
   ],
   build: () => [{
     name: 'Rejection',
-    widths: [12, 8, 12, 12, 12],
+    widths: [13, 9, 14, 13, 13],
     rows: [
+      ['REJECTION REPORT'],
+      ['One row for each style a sewing line rejected pieces from, day by day. The yellow rows are examples — type over them or delete them.'],
       ['DATE', 'LINE', 'STYLE NO', 'ORDER QTY', 'REJECT QTY'],
       [day(-2), 1, 'AU-4471', 900, 6],
       [day(-2), 2, 'AU-4482', 700, 11],
       [day(-1), 1, 'AU-4471', 900, 4],
-      [day(-1), 2, 'AU-4482', 700, 8]
-    ]
+      [day(-1), 2, 'AU-4482', 700, 8],
+      ...blankRows(24)
+    ],
+    style: {
+      width: 5,
+      title: [0, 1],
+      headers: [2],
+      data: [3, 30],
+      examples: [3, 4, 5, 6],
+      dates: [0],
+      integers: [1, 3, 4],
+      required: [0, 1, 4],
+      filter: true
+    }
   }]
 };
 
@@ -532,14 +700,29 @@ const hrAttendance: UploadTemplate = {
   ],
   build: () => [{
     name: 'Attendance',
-    widths: [12, 14, 14, 15, 10, 10, 10, 24],
+    widths: [13, 15, 14, 15, 10, 10, 11, 26],
     rows: [
+      ['HR ATTENDANCE SHEET'],
+      ['One row for each department, each working day. The yellow rows are examples — type over them or delete them. Present, absent and leave are what absenteeism is worked out from.'],
       ['Date', 'Department', 'Direct Carder', 'Indirect Carder', 'Present', 'Absent', 'On Leave', 'Remarks'],
       [day(-2), 'Sewing', 180, 24, 192, 9, 3, ''],
       [day(-2), 'Cutting', 42, 8, 47, 2, 1, ''],
       [day(-1), 'Sewing', 180, 24, 188, 12, 4, 'Two machines down'],
-      [day(-1), 'Cutting', 42, 8, 46, 3, 1, '']
-    ]
+      [day(-1), 'Cutting', 42, 8, 46, 3, 1, ''],
+      ...blankRows(24)
+    ],
+    style: {
+      width: 8,
+      title: [0, 1],
+      headers: [2],
+      data: [3, 30],
+      examples: [3, 4, 5, 6],
+      dates: [0],
+      integers: [2, 3, 4, 5, 6],
+      required: [0, 4, 5],
+      choices: { 1: ['Sewing', 'Cutting', 'Finishing', 'Packing', 'Stores', 'Quality', 'Maintenance', 'Factory'] },
+      filter: true
+    }
   }]
 };
 
@@ -577,7 +760,7 @@ const loadingPlan: UploadTemplate = {
     { header: 'PED', requirement: 'recommended', format: 'Date (YYYY-MM-DD)',
       meaning: 'Planned end date.', alsoAccepted: ['Plan End Date', 'Finish Date', 'Output Date'] },
     { header: 'Status', requirement: 'optional', format: 'Upcoming, In progress, Hold or Completed',
-      meaning: 'Where the style has got to. Words like "running", "done" or "postponed" are understood.',
+      meaning: 'Where the style has got to — pick from the dropdown. Words like "running", "done" or "postponed" are understood too.',
       alsoAccepted: ['State', 'Stage', 'Progress'] },
     { header: 'Remarks', requirement: 'optional', format: 'Text',
       meaning: 'Anything the planner needs to note.', alsoAccepted: ['Note', 'Comment'] }
@@ -589,8 +772,10 @@ const loadingPlan: UploadTemplate = {
   ],
   build: () => [{
     name: 'Loading plan',
-    widths: [7, 10, 12, 12, 20, 11, 12, 12, 12, 12, 13, 22],
+    widths: [7, 10, 13, 13, 22, 11, 12, 12, 12, 12, 14, 24],
     rows: [
+      ['LOADING PLAN'],
+      ['One row for each style waiting on a line, in the order it will run. The yellow rows are examples — type over them or delete them. Status has a dropdown.'],
       ['Line', 'Sequence', 'Style No', 'Order No', 'School Name', 'Order Qty',
         'PP Date', 'PCD', 'PSD', 'PED', 'Status', 'Remarks'],
       [1, 1, 'AU-4471', 'PO-10233', 'St Anthony College', 6400,
@@ -598,8 +783,21 @@ const loadingPlan: UploadTemplate = {
       [1, 2, 'AU-4482', 'PO-10241', 'Royal Institute', 3800,
         day(12), day(15), day(18), day(31), 'Upcoming', ''],
       [2, 1, 'AU-4390', 'PO-10199', 'Holy Family Convent', 5200,
-        day(-6), day(-2), day(1), day(17), 'In progress', '']
-    ]
+        day(-6), day(-2), day(1), day(17), 'In progress', ''],
+      ...blankRows(24)
+    ],
+    style: {
+      width: 12,
+      title: [0, 1],
+      headers: [2],
+      data: [3, 29],
+      examples: [3, 4, 5],
+      dates: [6, 7, 8, 9],
+      integers: [0, 1, 5],
+      required: [0, 2],
+      choices: { 10: ['Upcoming', 'In progress', 'Hold', 'Completed'] },
+      filter: true
+    }
   }]
 };
 
@@ -637,35 +835,3 @@ export const REQUIREMENT_LABEL: Record<Requirement, string> = {
   recommended: 'Recommended',
   optional: 'Optional'
 };
-
-/**
- * The sheet that explains the workbook to whoever has to fill it in, built from
- * the same column list the Upload screen renders. Appended to every template, and
- * skipped by every importer — see guideSheet.ts.
- */
-export function guideSheetFor(template: UploadTemplate): TemplateSheet {
-  const rows: unknown[][] = [
-    [template.title],
-    [template.purpose],
-    [],
-    ['Where it lands', template.landsIn],
-    ['How often', template.cadence],
-    ['Recognised by', template.recognisedBy],
-    [],
-    ['Column', 'Required?', 'Format', 'What it means', 'Other headings accepted']
-  ];
-  for (const column of template.columns) {
-    rows.push([
-      column.header,
-      REQUIREMENT_LABEL[column.requirement],
-      column.format,
-      column.meaning,
-      column.alsoAccepted?.join(', ') ?? ''
-    ]);
-  }
-  rows.push([], ['Good to know']);
-  for (const note of template.notes) rows.push([note]);
-  rows.push([], ['This sheet is documentation and is never imported. Fill in the other sheet.']);
-
-  return { name: GUIDE_SHEET, rows, widths: [26, 14, 30, 62, 40] };
-}
