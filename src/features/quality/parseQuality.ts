@@ -3,7 +3,7 @@ import type {
   DefectRow, InspectionRow, QualityParseResult, QualityReportKind, QualityStage
 } from './types';
 import { REPORT_LABEL } from './types';
-import { isGuideSheet } from '@/features/excel/guideSheet';
+import { isHelperSheet } from '@/features/excel/guideSheet';
 
 // ---------------------------------------------------------------------------
 // Cell and grid helpers
@@ -233,7 +233,7 @@ function parseLineKpi(wb: XLSX.WorkBook, fileName: string): QualityParseResult {
   const linesSeen = new Set<number>();
 
   for (const name of wb.SheetNames) {
-    if (isGuideSheet(name)) continue;
+    if (isHelperSheet(name)) continue;
     const lineMatch = /^line\s*0*(\d+)$/i.exec(name.trim());
     if (!lineMatch) {
       skipped.push({ sheet: name, reason: 'not a per-line sheet' });
@@ -365,7 +365,7 @@ function parseDailyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseRes
 
   const defects = defectBlock(grid, bandRow, { inspectionDate: date, periodMonth: null });
   return finish('daily_quality', inspections, defects, [name],
-    wb.SheetNames.slice(1).filter((s) => !isGuideSheet(s))
+    wb.SheetNames.slice(1).filter((s) => !isHelperSheet(s))
       .map((s) => ({ sheet: s, reason: 'not the report sheet' })),
     warnings, fileName, linesSeen);
 }
@@ -483,7 +483,7 @@ function parseMonthlyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseR
   const linesSeen = new Set<number>();
 
   for (const name of wb.SheetNames) {
-    if (isGuideSheet(name)) continue;
+    if (isHelperSheet(name)) continue;
     const grid = readGrid(wb.Sheets[name]!);
     if (!grid.length) { skipped.push({ sheet: name, reason: 'empty' }); continue; }
 
@@ -624,7 +624,7 @@ function parseMonthlyInspection(wb: XLSX.WorkBook, fileName: string): QualityPar
 
   if (!inspections.length) warnings.push('Every month in the Summary sheet is still empty.');
   return finish('monthly_inspection', inspections, defects, [sheetName],
-    wb.SheetNames.filter((n) => n !== sheetName && !isGuideSheet(n))
+    wb.SheetNames.filter((n) => n !== sheetName && !isHelperSheet(n))
       .map((s) => ({ sheet: s, reason: 'not the Summary sheet' })),
     warnings, fileName);
 }
@@ -640,7 +640,7 @@ function parseDefectSummary(wb: XLSX.WorkBook, fileName: string): QualityParseRe
   const warnings: string[] = [];
 
   for (const name of wb.SheetNames) {
-    if (isGuideSheet(name)) continue;
+    if (isHelperSheet(name)) continue;
     const grid = readGrid(wb.Sheets[name]!);
     const headerIdx = grid.findIndex((r) => norm(r[0]) === 'month');
     if (headerIdx < 0) { skipped.push({ sheet: name, reason: 'no "Month" header row' }); continue; }
@@ -696,7 +696,7 @@ export function detectKind(wb: XLSX.WorkBook): QualityReportKind | null {
   // one template's guide would answer to another template's test and route the
   // file to the wrong parser. Documentation is never evidence of a layout.
   for (const name of wb.SheetNames) {
-    if (isGuideSheet(name)) continue;
+    if (isHelperSheet(name)) continue;
     const head = firstRowsText(wb, name);
     if (/daily\s+quality/.test(head)) return 'daily_quality';
     if (/monthly\s+quality/.test(head)) return 'monthly_quality';

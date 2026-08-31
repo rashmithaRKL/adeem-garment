@@ -176,8 +176,9 @@ export function TemplateLibrary({
       <p style={{ margin: '18px 0 0', fontSize: 12.5, color: 'var(--text-faint)' }}>
         Every template opens on a ruled table: the headings in the darker blue are the columns the
         import cannot run without, the yellow rows are examples to type over, and the empty rows
-        below them are ready to fill in. A second sheet, “Column guide”, describes each column
-        inside the file — it is documentation only and is never imported.
+        below them are ready to fill in. Behind it sit two helper sheets — “Column guide”, which
+        describes each column, and “Lists”, which holds the values behind any dropdowns so they can
+        be read and extended in a table of their own. Neither is ever imported.
       </p>
     </>
   );

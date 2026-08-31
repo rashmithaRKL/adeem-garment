@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { cellText, lineFromLabel, norm, readGrid, runsOf } from '@/features/excel/layout';
 import { cellDate, cellInt, type ImportIssue } from '@/features/excel/sheetKit';
-import { isGuideSheet } from '@/features/excel/guideSheet';
+import { isHelperSheet } from '@/features/excel/guideSheet';
 
 /**
  * The rejection report: how many pieces each sewing line threw out, style by
@@ -172,7 +172,7 @@ export async function tryParseRejectionFile(file: File): Promise<RejectionParseR
     // The guide sheet on the downloaded template spells out REJECT QTY in its
     // column list, which is exactly the signature this parser looks for: read as
     // data it produced a block with no line and a page of errors under it.
-    if (isGuideSheet(sheetName)) continue;
+    if (isHelperSheet(sheetName)) continue;
     const ws = workbook.Sheets[sheetName];
     if (!ws || !ws['!ref']) { sheetsSkipped.push({ sheet: sheetName, reason: 'empty' }); continue; }
 

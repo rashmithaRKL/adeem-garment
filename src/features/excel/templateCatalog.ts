@@ -74,7 +74,11 @@ export interface SheetStyle {
   width: number;
   /** A second table further down — the appearance defect block. */
   extra?: SheetStyle;
-  /** Turns the heading row into a filter row. Flat tables only. */
+  /**
+   * Turns the heading row into a filter row. Flat tables only: a banded sheet
+   * has no single heading row for Excel to hang one off. The columns are widened
+   * to leave room for the button, which otherwise sits on top of the heading.
+   */
   filter?: boolean;
 }
 
@@ -150,6 +154,49 @@ const bandRow = (width: number, cells: Record<number, unknown>): unknown[] =>
  */
 const blankRows = (count: number): unknown[][] => Array.from({ length: count }, () => []);
 
+/**
+ * The sewing lines the factory runs today. Every template lays all of them out —
+ * a sheet per line on the KPI report, a row per line everywhere else — so the
+ * person filling one in is never left to work out that the rows they need are
+ * missing. A fifth line is a copied sheet or an inserted row, and nothing in the
+ * importers depends on this number: the lines that exist are the lines the
+ * uploaded workbooks name.
+ */
+const LINES = [1, 2, 3, 4];
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/** What each line was running, so the examples read like a real day's paperwork. */
+const LINE_SAMPLE: Record<number, { style: string; order: string; buyer: string }> = {
+  1: { style: 'AU-4471', order: 'PO-10233', buyer: 'St Anthony College' },
+  2: { style: 'AU-4482', order: 'PO-10241', buyer: 'Royal Institute' },
+  3: { style: 'AU-4390', order: 'PO-10199', buyer: 'Holy Family Convent' },
+  4: { style: 'AU-4415', order: 'PO-10256', buyer: 'St Joseph Vaz College' }
+};
+
+/** Pieces checked and defects found at each of the four gates, line by line. */
+const GATE_SAMPLE: Record<number, { checked: number[]; defects: number[]; audits: number; auditFails: number }> = {
+  1: { checked: [320, 320, 300, 280], defects: [6, 4, 7, 3], audits: 2, auditFails: 0 },
+  2: { checked: [280, 280, 260, 240], defects: [9, 6, 8, 4], audits: 1, auditFails: 0 },
+  3: { checked: [300, 300, 290, 260], defects: [7, 5, 9, 5], audits: 2, auditFails: 1 },
+  4: { checked: [260, 260, 250, 230], defects: [5, 3, 6, 2], audits: 1, auditFails: 0 }
+};
+
+/** The appearance defects behind those figures, in the order the block lists them. */
+const DEFECT_SAMPLE: Record<number, number[]> = {
+  1: [3, 1, 0, 2, 1],
+  2: [4, 1, 1, 1, 1],
+  3: [5, 2, 1, 1, 0],
+  4: [2, 1, 0, 2, 1]
+};
+
+const sum = (values: number[]): number => values.reduce((total, n) => total + n, 0);
+
+/** CHECK QTY, DEFECT QTY, DEFECT %, PASS % — the four columns of one gate. */
+const gateColumns = (checked: number, defects: number): number[] => [
+  checked, defects, round2((defects / checked) * 100), round2(100 - (defects / checked) * 100)
+];
+
 // ---------------------------------------------------------------------------
 // Production
 // ---------------------------------------------------------------------------
@@ -217,14 +264,20 @@ const production: UploadTemplate = {
       ['One row for each order a sewing line ran that day. The yellow rows are examples — type over them or delete them. Headings in the darker blue must be filled in.'],
       ['Date', 'Line', 'Order No', 'Buyer', 'Style No', 'Product', 'Colour', 'Size',
         'Order Qty', 'Target Qty', 'Produced Qty', 'Efficiency %', 'Delivery Date', 'Remarks'],
-      [day(-2), 1, 'PO-10233', 'St Anthony College', 'AU-4471', 'Shirt', 'White', '28-40',
-        6400, 900, 872, 82.4, day(21), ''],
-      [day(-2), 2, 'PO-10241', 'Royal Institute', 'AU-4482', 'Trouser', 'Navy', '26-38',
-        3800, 700, 654, 81.2, day(26), 'One machine down until noon'],
-      [day(-1), 1, 'PO-10233', 'St Anthony College', 'AU-4471', 'Shirt', 'White', '28-40',
-        6400, 900, 918, 86.9, day(21), ''],
-      [day(-1), 2, 'PO-10241', 'Royal Institute', 'AU-4482', 'Trouser', 'Navy', '26-38',
-        3800, 700, 705, 83.5, day(26), ''],
+      // One row per line, so all four are laid out and the day is complete.
+      ...LINES.map((line) => {
+        const it = LINE_SAMPLE[line]!;
+        const product = ['Shirt', 'Trouser', 'Skirt', 'Shirt'][line - 1]!;
+        const colour = ['White', 'Navy', 'Navy', 'Blue'][line - 1]!;
+        const orderQty = [6400, 3800, 5200, 4600][line - 1]!;
+        const target = [900, 700, 800, 750][line - 1]!;
+        // Under target, every one of them: a produced quantity above its target
+        // is a legitimate day, but the importer flags it for checking, and a
+        // template should not ship with a warning already in it.
+        const produced = [872, 654, 762, 703][line - 1]!;
+        return [day(-1), line, it.order, it.buyer, it.style, product, colour, '26-40',
+          orderQty, target, produced, round2((produced / target) * 88), day(21 + line), ''];
+      }),
       ...blankRows(24)
     ],
     style: {
@@ -232,7 +285,7 @@ const production: UploadTemplate = {
       title: [0, 1],
       headers: [2],
       data: [3, 30],
-      examples: [3, 4, 5, 6],
+      examples: rangeOf(3, LINES.length),
       dates: [0, 12],
       integers: [1, 8, 9, 10],
       percents: [11],
@@ -267,7 +320,7 @@ const qualityLineKpi: UploadTemplate = {
   ],
   notes: [
     'Row 1 names the stage over each block — In line, End line, Appearance, Final, AQL — and row 2 names its three columns. Data starts on row 3.',
-    'One sheet per line, named LINE 01, LINE 02, LINE 03 … Copy a sheet and rename it to add a line.',
+    'One sheet per line — LINE 01 to LINE 04, one for each line the factory runs. To add a fifth, copy a sheet and rename it LINE 05.',
     'A stage the line did not run that day is left blank. A zero is read as blank, so it never draws a 0% point on the charts.',
     'A sheet for a line that has not been inspected yet still registers the line, so it appears on the Quality screens.',
     'These two rows are fixed: the importer reads the banner from row 1 and the headings from row 2, so nothing may be inserted above them.'
@@ -287,26 +340,22 @@ const qualityLineKpi: UploadTemplate = {
       integers: Array.from({ length: 15 }, (_, i) => i + 1),
       required: [0, 1, 4, 7, 10, 13]
     };
-    return [
-      {
-        name: 'LINE 01',
-        widths,
-        style,
-        rows: [banner, sub,
-          [day(-2), 320, 314, 6, 320, 316, 4, 300, 293, 7, 280, 277, 3, 2, 2, 0],
-          [day(-1), 340, 333, 7, 340, 337, 3, 320, 314, 6, 300, 298, 2, 2, 2, 0],
-          ...blankRows(18)]
-      },
-      {
-        name: 'LINE 02',
-        widths,
-        style,
-        rows: [banner, sub,
-          [day(-2), 280, 271, 9, 280, 274, 6, 260, 252, 8, 240, 236, 4, 1, 1, 0],
-          [day(-1), 290, 284, 6, 290, 285, 5, 270, 265, 5, 250, 247, 3, 1, 1, 0],
-          ...blankRows(18)]
-      }
-    ];
+
+    /** CHECKED, PASS and FAIL for each gate, on one day of one line. */
+    const dayRow = (date: string, line: number, lift: number): unknown[] => {
+      const gates = GATE_SAMPLE[line]!;
+      return [date, ...gates.checked.flatMap((checked, i) => {
+        const fail = gates.defects[i]!;
+        return [checked + lift, checked + lift - fail, fail];
+      }), gates.audits, gates.audits - gates.auditFails, gates.auditFails];
+    };
+
+    return LINES.map((line) => ({
+      name: `LINE ${String(line).padStart(2, '0')}`,
+      widths,
+      style,
+      rows: [banner, sub, dayRow(day(-2), line, 0), dayRow(day(-1), line, 20), ...blankRows(18)]
+    }));
   }
 };
 
@@ -319,6 +368,65 @@ const DEFECT_BLOCK: unknown[][] = [
   ['Appearance Defect Summary'],
   ['Line', 'Check Qty', 'Uncut Threads', 'Oil Marks', 'Shade Variation', 'Measurement', 'Stain']
 ];
+
+/**
+ * The daily and monthly reports carry the same figures at two grains, so the
+ * sample rows are written once and scaled. A month is 22 working days here —
+ * near enough that the example totals read as a month's worth rather than as a
+ * day's figures with a zero added.
+ */
+type Grain = 'daily' | 'monthly';
+
+const MONTH_DAYS = 22;
+
+const scaleOf = (grain: Grain): number => (grain === 'daily' ? 1 : MONTH_DAYS);
+
+const rangeOf = (start: number, count: number): number[] =>
+  Array.from({ length: count }, (_, i) => start + i);
+
+/** One line's row across the four gates and the AQL block beside them. */
+function gateRow(line: number, grain: Grain): unknown[] {
+  const scale = scaleOf(grain);
+  const gates = GATE_SAMPLE[line]!;
+  const stages = gates.checked.flatMap((checked, i) =>
+    gateColumns(checked * scale, gates.defects[i]! * scale));
+  const audits = gates.audits * scale;
+  const fails = gates.auditFails * scale;
+  const passPct = round2(((audits - fails) / audits) * 100);
+
+  return grain === 'daily'
+    ? [line, LINE_SAMPLE[line]!.style, ...stages, audits, audits - fails, fails, passPct]
+    : [line, ...stages, audits, audits - fails, fails, passPct, round2(100 - passPct)];
+}
+
+/** The roll-up row that closes the stage table, and every figure in it adds up. */
+function factoryGateRow(grain: Grain): unknown[] {
+  const scale = scaleOf(grain);
+  const stages = [0, 1, 2, 3].flatMap((gate) => gateColumns(
+    sum(LINES.map((line) => GATE_SAMPLE[line]!.checked[gate]! * scale)),
+    sum(LINES.map((line) => GATE_SAMPLE[line]!.defects[gate]! * scale))
+  ));
+  const audits = sum(LINES.map((line) => GATE_SAMPLE[line]!.audits * scale));
+  const fails = sum(LINES.map((line) => GATE_SAMPLE[line]!.auditFails * scale));
+  const passPct = round2(((audits - fails) / audits) * 100);
+
+  return grain === 'daily'
+    ? ['FACTORY', '', ...stages, audits, audits - fails, fails, passPct]
+    : ['FACTORY', ...stages, audits, audits - fails, fails, passPct, round2(100 - passPct)];
+}
+
+/** A line's row in the appearance defect block below the stage table. */
+function defectRow(line: number, grain: Grain): unknown[] {
+  const scale = scaleOf(grain);
+  return [line, GATE_SAMPLE[line]!.checked[2]! * scale,
+    ...DEFECT_SAMPLE[line]!.map((qty) => qty * scale)];
+}
+
+function factoryDefectRow(grain: Grain): unknown[] {
+  const scale = scaleOf(grain);
+  return ['FACTORY', sum(LINES.map((line) => GATE_SAMPLE[line]!.checked[2]! * scale)),
+    ...[0, 1, 2, 3, 4].map((i) => sum(LINES.map((line) => DEFECT_SAMPLE[line]![i]! * scale)))];
+}
 
 const qualityDaily: UploadTemplate = {
   id: 'quality-daily',
@@ -354,7 +462,7 @@ const qualityDaily: UploadTemplate = {
   notes: [
     'Stage banners sit on one row, their four columns on the next, and the AQL PASS and FAIL on the row after that. Data starts below all three.',
     'The FACTORY row ends the stage table; the defect summary block below it is read separately.',
-    'To add a line, insert a row above FACTORY — the roll-up has to stay at the foot of the table.',
+    'All four lines are laid out. To add another, insert a row above FACTORY — the roll-up has to stay at the foot of the table.',
     'A stage with nothing in it is skipped rather than imported as zero.'
   ],
   build: () => {
@@ -371,32 +479,27 @@ const qualityDaily: UploadTemplate = {
         ['DAILY QUALITY PERFORMANCE REPORT'],
         [`Date :- ${day(-1)}`],
         banner, sub, sub2,
-        [1, 'AU-4471', 320, 6, 1.88, 98.13, 320, 4, 1.25, 98.75, 300, 7, 2.33, 97.67,
-          280, 3, 1.07, 98.93, 2, 2, 0, 100],
-        [2, 'AU-4482', 280, 9, 3.21, 96.79, 280, 6, 2.14, 97.86, 260, 8, 3.08, 96.92,
-          240, 4, 1.67, 98.33, 1, 1, 0, 100],
-        ['FACTORY', '', 600, 15, 2.5, 97.5, 600, 10, 1.67, 98.33, 560, 15, 2.68, 97.32,
-          520, 7, 1.35, 98.65, 3, 3, 0, 100],
+        ...LINES.map((line) => gateRow(line, 'daily')),
+        factoryGateRow('daily'),
         ...DEFECT_BLOCK,
-        [1, 300, 3, 1, 0, 2, 1],
-        [2, 260, 4, 1, 1, 1, 1],
-        ['FACTORY', 560, 7, 2, 1, 3, 2]
+        ...LINES.map((line) => defectRow(line, 'daily')),
+        factoryDefectRow('daily')
       ],
       style: {
         width,
         title: [0, 1],
         banner: [2],
         headers: [3, 4],
-        data: [5, 7],
-        examples: [5, 6, 7],
+        data: [5, 5 + LINES.length],
+        examples: rangeOf(5, LINES.length + 1),
         percents: [4, 5, 8, 9, 12, 13, 16, 17, 21],
         required: [0, 2, 6, 10, 14],
         extra: {
           width: 7,
-          title: [9],
-          headers: [10],
-          data: [11, 13],
-          examples: [11, 12, 13],
+          title: [7 + LINES.length],
+          headers: [8 + LINES.length],
+          data: [9 + LINES.length, 9 + LINES.length * 2],
+          examples: rangeOf(9 + LINES.length, LINES.length + 1),
           required: [0]
         }
       }
@@ -436,49 +539,44 @@ const qualityMonthly: UploadTemplate = {
       meaning: 'The audit pass and fail rates.' }
   ],
   notes: [
-    'One sheet per month. Copy the sheet, change the "Month :-" line and fill in the figures.',
+    'One sheet per month, with a row for each of the four lines. Copy the sheet, change the "Month :-" line and fill in the figures.',
     'The appearance defect block below the table is read the same way as on the daily report.',
     'Rows are totals for the month, not for a day, and are never mixed with daily figures on screen.'
   ],
   build: () => {
-    const width = 23;
+    const width = 22;
     const banner = bandRow(width, { 1: 'IN LINE', 5: 'END LINE', 9: 'APPEARANCE', 13: 'FINAL', 17: 'AQL' });
     const sub = ['TEAM NO',
       ...STAGE_BLOCK, ...STAGE_BLOCK, ...STAGE_BLOCK, ...STAGE_BLOCK,
       'TOTAL NO OF AUDITS', '% OF AUDIT PASS', '% OF AUDIT FAIL', 'AQL PASS %', 'AQL FAIL %'];
     return [{
       name: month(0),
-      widths: [10, ...Array.from({ length: 22 }, () => 11)],
+      widths: [10, ...Array.from({ length: 21 }, () => 11)],
       rows: [
         ['MONTHLY QUALITY PERFORMANCE REPORT'],
         [`Month :- ${month(0).toUpperCase()}`],
         banner, sub,
-        [1, 7200, 138, 1.92, 98.08, 7200, 96, 1.33, 98.67, 6800, 151, 2.22, 97.78,
-          6400, 71, 1.11, 98.89, 42, 40, 2, 95.24, 4.76],
-        [2, 6300, 168, 2.67, 97.33, 6300, 121, 1.92, 98.08, 5900, 174, 2.95, 97.05,
-          5600, 83, 1.48, 98.52, 38, 35, 3, 92.11, 7.89],
-        ['FACTORY', 13500, 306, 2.27, 97.73, 13500, 217, 1.61, 98.39, 12700, 325, 2.56, 97.44,
-          12000, 154, 1.28, 98.72, 80, 75, 5, 93.75, 6.25],
+        ...LINES.map((line) => gateRow(line, 'monthly')),
+        factoryGateRow('monthly'),
         ...DEFECT_BLOCK,
-        [1, 6800, 64, 21, 9, 44, 13],
-        [2, 5900, 78, 26, 14, 41, 15],
-        ['FACTORY', 12700, 142, 47, 23, 85, 28]
+        ...LINES.map((line) => defectRow(line, 'monthly')),
+        factoryDefectRow('monthly')
       ],
       style: {
         width,
         title: [0, 1],
         banner: [2],
         headers: [3],
-        data: [4, 6],
-        examples: [4, 5, 6],
-        percents: [3, 4, 7, 8, 11, 12, 15, 16, 21, 22],
+        data: [4, 4 + LINES.length],
+        examples: rangeOf(4, LINES.length + 1),
+        percents: [3, 4, 7, 8, 11, 12, 15, 16, 20, 21],
         required: [0, 1, 5, 9, 13],
         extra: {
           width: 7,
-          title: [8],
-          headers: [9],
-          data: [10, 12],
-          examples: [10, 11, 12],
+          title: [6 + LINES.length],
+          headers: [7 + LINES.length],
+          data: [8 + LINES.length, 8 + LINES.length * 2],
+          examples: rangeOf(8 + LINES.length, LINES.length + 1),
           required: [0]
         }
       }
@@ -637,10 +735,11 @@ const rejection: UploadTemplate = {
       ['REJECTION REPORT'],
       ['One row for each style a sewing line rejected pieces from, day by day. The yellow rows are examples — type over them or delete them.'],
       ['DATE', 'LINE', 'STYLE NO', 'ORDER QTY', 'REJECT QTY'],
-      [day(-2), 1, 'AU-4471', 900, 6],
-      [day(-2), 2, 'AU-4482', 700, 11],
-      [day(-1), 1, 'AU-4471', 900, 4],
-      [day(-1), 2, 'AU-4482', 700, 8],
+      // Every line gets a row, including one that rejected nothing that day.
+      ...LINES.map((line) => [
+        day(-1), line, LINE_SAMPLE[line]!.style,
+        [900, 700, 800, 750][line - 1]!, [6, 11, 4, 0][line - 1]!
+      ]),
       ...blankRows(24)
     ],
     style: {
@@ -648,7 +747,7 @@ const rejection: UploadTemplate = {
       title: [0, 1],
       headers: [2],
       data: [3, 30],
-      examples: [3, 4, 5, 6],
+      examples: rangeOf(3, LINES.length),
       dates: [0],
       integers: [1, 3, 4],
       required: [0, 1, 4],
@@ -778,20 +877,25 @@ const loadingPlan: UploadTemplate = {
       ['One row for each style waiting on a line, in the order it will run. The yellow rows are examples — type over them or delete them. Status has a dropdown.'],
       ['Line', 'Sequence', 'Style No', 'Order No', 'School Name', 'Order Qty',
         'PP Date', 'PCD', 'PSD', 'PED', 'Status', 'Remarks'],
-      [1, 1, 'AU-4471', 'PO-10233', 'St Anthony College', 6400,
-        day(3), day(6), day(9), day(24), 'Upcoming', ''],
-      [1, 2, 'AU-4482', 'PO-10241', 'Royal Institute', 3800,
-        day(12), day(15), day(18), day(31), 'Upcoming', ''],
-      [2, 1, 'AU-4390', 'PO-10199', 'Holy Family Convent', 5200,
-        day(-6), day(-2), day(1), day(17), 'In progress', ''],
+      // What each of the four lines runs next, and a second style queued behind
+      // the first, which is what the Sequence column is for.
+      ...LINES.map((line) => {
+        const it = LINE_SAMPLE[line]!;
+        const status = line === 1 ? 'In progress' : 'Upcoming';
+        const offset = line * 3;
+        return [line, 1, it.style, it.order, it.buyer, [6400, 3800, 5200, 4600][line - 1]!,
+          day(offset - 6), day(offset - 2), day(offset + 1), day(offset + 17), status, ''];
+      }),
+      [1, 2, 'AU-4508', 'PO-10262', 'St Anthony College', 2900,
+        day(12), day(15), day(18), day(31), 'Upcoming', 'Runs after AU-4471'],
       ...blankRows(24)
     ],
     style: {
       width: 12,
       title: [0, 1],
       headers: [2],
-      data: [3, 29],
-      examples: [3, 4, 5],
+      data: [3, 31],
+      examples: rangeOf(3, LINES.length + 1),
       dates: [6, 7, 8, 9],
       integers: [0, 1, 5],
       required: [0, 2],

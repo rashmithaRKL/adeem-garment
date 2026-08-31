@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { requiredHits, scoreHeaders } from './columnDetection';
-import { isGuideSheet } from './guideSheet';
+import { isHelperSheet } from './guideSheet';
 
 /**
  * Works out how a production workbook is actually laid out, because no two
@@ -383,7 +383,7 @@ export interface WorkbookLayout {
 export function analyseWorkbook(workbook: XLSX.WorkBook): WorkbookLayout {
   // The guide sheet on a downloaded template documents the very headers this
   // scan looks for. It is not data and is not counted as a tab that was skipped.
-  const names = workbook.SheetNames.filter((n) => !isGuideSheet(n));
+  const names = workbook.SheetNames.filter((n) => !isHelperSheet(n));
 
   const all: SheetLayout[] = [];
   for (const name of names) {
