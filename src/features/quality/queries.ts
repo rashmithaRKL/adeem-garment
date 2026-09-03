@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
-import { addMonths, monthEnd, monthStart, today as todayISO, withinSpan } from './period';
-import type { QualitySpan } from './period';
+import { addMonths, monthEnd, monthStart, today as todayISO, weekStart, withinSpan } from './period';
+import type { QualityRange, QualitySpan } from './period';
 import { STAGE_LABEL } from './types';
 import type { QualityReportKind, QualityStage } from './types';
 
@@ -15,6 +15,28 @@ export interface QualityUploadRow {
   defect_rows: number;
   created_at: string;
   profiles?: { full_name: string } | null;
+}
+
+const PAGE_SIZE = 1000;
+
+/**
+ * Pages through every row a query matches rather than stopping at one page. A
+ * flat .limit() silently drops whatever is oldest once a factory's history grows
+ * past it — the screen then reads as "this is all there is" instead of "this
+ * request only asked for so much", and the earliest-date arrows lock a month or
+ * a year before the reports actually run out.
+ */
+async function fetchAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await page(from, from + PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const batch = data ?? [];
+    rows.push(...batch);
+    if (batch.length < PAGE_SIZE) return rows;
+  }
 }
 
 /**
@@ -158,22 +180,19 @@ export interface QualityRecords {
  * that is true by construction rather than by four queries happening to match.
  */
 export async function fetchQualityRecords(): Promise<QualityRecords> {
-  const [
-    { data: insData, error: insError },
-    { data: defData, error: defError },
-    { data: lineData, error: lineError },
-    { data: finalData, error: finalError }
-  ] = await Promise.all([
-    supabase
+  const [insData, defData, { data: lineData, error: lineError }, finalData] = await Promise.all([
+    fetchAllRows<InspectionRow>((from, to) => supabase
       .from('quality_inspections')
       .select('line_no,line_label,inspection_date,period_month,stage,checked_qty,pass_qty,defect_qty,pass_pct')
       .eq('is_factory', false)
       .order('inspection_date', { ascending: false })
-      .limit(5000),
-    supabase
+      .order('id')
+      .range(from, to)),
+    fetchAllRows<DefectRow>((from, to) => supabase
       .from('quality_defects')
       .select('line_no,line_label,is_factory,inspection_date,period_month,category,qty')
-      .limit(5000),
+      .order('id')
+      .range(from, to)),
     // The roster the factory actually runs. A line the reports have not measured
     // yet has no inspection row to be inferred from, and inferring the line list
     // from the figures is what hid LINE 04 while the other three were charted.
@@ -185,26 +204,24 @@ export async function fetchQualityRecords(): Promise<QualityRecords> {
     // Final inspection is the only stage filed at factory level, so it is the one
     // place the is_factory exclusion above would throw away real data rather than
     // a roll-up of rows already counted.
-    supabase
+    fetchAllRows<FinalInspectionRow>((from, to) => supabase
       .from('quality_inspections')
       .select('period_month,checked_qty,defect_qty,pass_pct,defect_pct')
       .eq('is_factory', true)
       .eq('stage', 'final')
       .order('period_month', { ascending: true })
-      .limit(500)
+      .order('id')
+      .range(from, to))
   ]);
-  if (insError) throw new Error(insError.message);
-  if (defError) throw new Error(defError.message);
   if (lineError) throw new Error(lineError.message);
-  if (finalError) throw new Error(finalError.message);
 
   return {
-    inspections: reportable((insData ?? []) as InspectionRow[]),
-    defects: (defData ?? []) as DefectRow[],
+    inspections: reportable(insData),
+    defects: defData,
     lines: ((lineData ?? []) as { line_number: number; line_name: string | null }[])
       .filter((l) => l.line_number != null && l.line_number > 0)
       .map((l) => ({ lineNo: l.line_number, label: lineLabel(l.line_number, l.line_name) })),
-    finals: (finalData ?? []) as FinalInspectionRow[]
+    finals: finalData
   };
 }
 
@@ -257,6 +274,19 @@ export interface QualityMatrix {
    * every category it carried is shown instead.
    */
   defectsGated: boolean;
+  /**
+   * Every category's total, the ones outside the top five included. The chart
+   * shows five slices; this is what all of them together account for.
+   */
+  defectsCategorised: number;
+  /**
+   * Defects counted at the gates this breakdown covers — what the categories are
+   * a breakdown *of*, and so what the chart has to add up to. The categories are
+   * typed into a block of their own on the sheet, beside the gate columns rather
+   * than derived from them, so the two can disagree; the chart shows the gap
+   * instead of quietly totalling to less than the "Defects found" tile.
+   */
+  defectsAtBreakdownGates: number;
   /** Defect quantities per line for the top categories, in the same line order. */
   defectsByLine: { lineNo: number | null; label: string; byCategory: Record<string, number> }[];
   trend: TrendPoint[];
@@ -275,6 +305,11 @@ export interface FinalInspectionMonth {
    * from the two counts beside it and never averaged across months.
    */
   passPct: number | null;
+  /**
+   * The defective share of the sample: the report's own "Defect %" where the
+   * sheet fills it in, and defects over checked where it does not.
+   */
+  defectPct: number | null;
 }
 
 /** One line's final-inspection result over the selected window. */
@@ -461,9 +496,33 @@ const monthlyIn = <T extends Dated>(rows: T[], span: QualitySpan): T[] =>
     : rows.filter((r) => r.inspection_date == null && r.period_month != null
         && withinSpan(r.period_month, span));
 
-/** The date a row is plotted against, once the grain is settled. */
-const pointOf = (r: Dated, grain: QualityGrain): string =>
-  (grain === 'daily' ? r.inspection_date : r.period_month)!;
+/** The date a row is plotted against, or null when it was filed at the other
+ *  grain and so belongs to no point on this axis. */
+const pointOf = (r: Dated, grain: QualityGrain): string | null =>
+  (grain === 'daily' ? r.inspection_date : r.period_month);
+
+/**
+ * Which line a row belongs to. Keyed by number where the report gives one so the
+ * roster and the figures meet on the same key, and by label only for a row that
+ * names no line at all.
+ */
+const lineKeyOf = (r: { line_no: number | null; line_label: string | null }): string =>
+  (r.line_no != null ? String(r.line_no) : (r.line_label ?? '—'));
+
+/**
+ * One line's reading of one gate — the unit the daily/monthly choice is made for.
+ *
+ * Per line alone is not fine enough. A line keys its floor gates into the daily
+ * sheet all month and has its final gate written up once in the monthly report:
+ * judged per line, the daily floor rows would still delete the monthly final row,
+ * which is the shape LINE 04 actually had. Per gate, each column answers from the
+ * grain it was filed at, and the double-count the rule exists to stop — a month
+ * summed with the days inside it — is still impossible, because that would take
+ * the same line and the same gate at both grains.
+ */
+const gateKeyOf = (
+  r: { line_no: number | null; line_label: string | null; stage: QualityStage }
+): string => lineKeyOf(r) + '|' + r.stage;
 
 /** Whether the history holds daily reports at all — not just inside some window. */
 export const hasDailyReports = (data: QualityRecords): boolean =>
@@ -570,6 +629,48 @@ export function openingDate(data: QualityRecords): string | null {
   return now < start ? start : now > end ? end : now;
 }
 
+/** The key in `keys` closest to `now`, ties going to the earlier one. */
+function nearest(keys: Iterable<string>, now: string): string | null {
+  let best: string | null = null;
+  for (const k of keys) {
+    if (best == null) { best = k; continue; }
+    const gap = daysBetween(k, now) - daysBetween(best, now);
+    if (gap < 0 || (gap === 0 && k < best)) best = k;
+  }
+  return best;
+}
+
+/**
+ * The anchor a range should open on, picked for that range specifically rather
+ * than for whichever grain the factory files most: the latest day with figures
+ * for Daily, the latest week for Weekly, the latest month for Monthly. Pressing
+ * Weekly after Daily is asking "how does the most recent reporting look as a
+ * week", not "what week does today fall in" — today may be empty while the
+ * report a manager actually wants to see is a few days old.
+ */
+export function openingAnchorFor(range: QualityRange, data: QualityRecords): string | null {
+  const now = todayISO();
+
+  if (range === 'month') {
+    const months = [...monthsWithFigures(data)];
+    if (months.length === 0) return null;
+    const month = nearest(months, now)!;
+    const start = monthStart(month);
+    const end = monthEnd(month);
+    return now < start ? start : now > end ? end : now;
+  }
+
+  const days = daysWithFigures(data);
+  if (days.size === 0) return null;
+
+  if (range === 'day') return nearest(days, now);
+
+  // Week: compare by the Monday each figured day's week starts on, so every day
+  // in the same calendar week resolves to the same anchor.
+  const weeks = new Set([...days].map(weekStart));
+  return nearest(weeks, weekStart(now));
+}
+
 /** The oldest date any report reaches — the floor for the date field. */
 export function earliestDate(data: QualityRecords): string | null {
   let best: string | null = null;
@@ -626,11 +727,22 @@ export function buildQualityMatrix(
 ): QualityMatrix {
   const daily = dailyIn(data.inspections, span);
   const monthly = monthlyIn(data.inspections, span);
-  // Daily wins wherever it exists: it is the finer grain and the one the window
-  // was drawn against. Monthly rows answer a month-wide window with nothing else
-  // in it — never alongside the days they already contain.
+  // Daily wins wherever it exists — but line by line, not for the factory at
+  // once. Two lines can be filed at two different grains in the same month: the
+  // floor keys its own sheets daily while a line that ships on its own gets
+  // written up in the monthly report. Judging the window as a whole meant one
+  // line's daily rows deleted another line's only figures, which is how LINE 04
+  // came to read "not inspected" beside three lines that were.
+  //
+  // The rule it replaces is still kept, because it is the one that matters: a
+  // line is never counted at both grains, so a monthly summary and the days
+  // inside it can never be summed over the same pieces.
+  const gatesFiledDaily = new Set(daily.map(gateKeyOf));
+  const rows = [...daily, ...monthly.filter((r) => !gatesFiledDaily.has(gateKeyOf(r)))];
+  // The trend is one axis, so it still has a single grain: whichever the window
+  // mostly speaks. Rows filed at the other one keep their line and stage figures
+  // and simply sit out of the chart.
   const grain: QualityGrain = daily.length > 0 || monthly.length === 0 ? 'daily' : 'monthly';
-  const rows = grain === 'daily' ? daily : monthly;
 
   let checked = 0;
   let defects = 0;
@@ -667,7 +779,7 @@ export function buildQualityMatrix(
     const st = stageMap.get(r.stage) ?? { checked: 0, defects: 0 };
     stageMap.set(r.stage, { checked: st.checked + c, defects: st.defects + d });
 
-    const key = r.line_no != null ? String(r.line_no) : (r.line_label ?? '—');
+    const key = lineKeyOf(r);
     const line = lineMap.get(key) ?? {
       key, label: r.line_label ?? `Line ${key}`, lineNo: r.line_no,
       stages: {}, checked: 0, defects: 0, rejectionPct: null,
@@ -683,8 +795,8 @@ export function buildQualityMatrix(
     }
     lineMap.set(key, line);
 
-    if (counts) {
-      const p = pointOf(r, grain);
+    const p = counts ? pointOf(r, grain) : null;
+    if (p != null) {
       const bucket = periodMap.get(p) ?? { checked: 0, defects: 0 };
       periodMap.set(p, { checked: bucket.checked + c, defects: bucket.defects + d });
     }
@@ -751,6 +863,17 @@ export function buildQualityMatrix(
     .sort((a, b) => b.qty - a.qty)
     .slice(0, 5);
 
+  // The breakdown is a breakdown of the gate columns beside it, so it is measured
+  // against those and not against itself. Which gates depends on whether the
+  // categories named one: named, the card covers end line and appearance and is
+  // judged against those two; unnamed, it carries everything the report had and
+  // answers to all three floor gates — the same figure the "Defects found" tile
+  // shows, which is where the client reads it from.
+  const breakdownStages = namesGates ? DEFECT_STAGES : FLOOR_STAGES;
+  const defectsAtBreakdownGates = breakdownStages
+    .reduce((sum, s) => sum + (stageMap.get(s)?.defects ?? 0), 0);
+  const defectsCategorised = [...catTotals.values()].reduce((sum, q) => sum + q, 0);
+
   // Keyed by line number, not by the label printed on the sheet, so this chart
   // carries the same lines in the same order as the pass-rate chart above it —
   // including the ones with nothing to stack.
@@ -794,6 +917,8 @@ export function buildQualityMatrix(
       .sort((a, b) => b.checked - a.checked),
     topDefects,
     defectsGated: namesGates,
+    defectsCategorised,
+    defectsAtBreakdownGates,
     finalInspection,
     defectsByLine: [...byLine.values()].sort(byLineOrder),
     trend: [...periodMap.entries()]
@@ -870,11 +995,12 @@ export function buildFinalInspection(
   const finalRows = data.inspections.filter((r) => r.stage === 'final');
   const daily = dailyIn(finalRows, span);
   const monthly = monthlyIn(finalRows, span);
-  // Daily wins wherever it exists, exactly as the rest of the page decides it: a
-  // monthly summary already contains the days inside it, and summing both would
-  // count every piece twice.
+  // Line by line, exactly as the matrix decides it: a line is never counted at
+  // both grains, but one line filing daily no longer erases another line whose
+  // final gate was only ever written up monthly.
+  const gatesFiledDaily = new Set(daily.map(gateKeyOf));
+  const rows = [...daily, ...monthly.filter((r) => !gatesFiledDaily.has(gateKeyOf(r)))];
   const grain: QualityGrain = daily.length > 0 || monthly.length === 0 ? 'daily' : 'monthly';
-  const rows = grain === 'daily' ? daily : monthly;
 
   let inspections = 0;
   let checked = 0;
@@ -904,7 +1030,7 @@ export function buildFinalInspection(
     pass += v.pass;
     fail += v.fail;
 
-    const key = r.line_no != null ? String(r.line_no) : (r.line_label ?? '—');
+    const key = lineKeyOf(r);
     const line = lineMap.get(key) ?? {
       key, lineNo: r.line_no, label: r.line_label ?? `Line ${key}`,
       inspections: 0, checked: 0, pass: 0, fail: 0,
@@ -917,6 +1043,7 @@ export function buildFinalInspection(
     lineMap.set(key, line);
 
     const at = pointOf(r, grain);
+    if (at == null) continue;
     const bucket = periodMap.get(at) ?? { inspections: 0, checked: 0, pass: 0, fail: 0 };
     periodMap.set(at, {
       inspections: bucket.inspections + 1,
@@ -1005,34 +1132,52 @@ export function buildFinalInspection(
  * factory-level audit to per-line totals would count the same garments twice.
  */
 function buildFinalAudit(rows: FinalInspectionRow[], months: string[]): FinalAudit {
-  const byMonth = new Map<string, { checked: number; defects: number; passPct: number | null }>();
+  const byMonth = new Map<string, {
+    checked: number; defects: number; passPct: number | null; defectPct: number | null;
+  }>();
   for (const r of rows) {
     if (!r.period_month || !months.includes(r.period_month)) continue;
-    const acc = byMonth.get(r.period_month) ?? { checked: 0, defects: 0, passPct: null };
+    const acc = byMonth.get(r.period_month)
+      ?? { checked: 0, defects: 0, passPct: null, defectPct: null };
     acc.checked += r.checked_qty ?? 0;
     acc.defects += r.defect_qty ?? 0;
     // Reported, not derived. A later report for the same month replaces the rate
     // rather than being averaged with it — two readings of one month are a
-    // correction, not two samples.
+    // correction, not two samples. Both rates are treated the same way, so the
+    // sheet's own Defect % survives the trip rather than being recomputed here.
     if (r.pass_pct != null) acc.passPct = r.pass_pct;
+    if (r.defect_pct != null) acc.defectPct = r.defect_pct;
     byMonth.set(r.period_month, acc);
   }
 
   const list = [...byMonth.entries()]
-    .map(([m, v]) => ({ month: m, checked: v.checked, defects: v.defects, passPct: v.passPct }))
+    .map(([m, v]) => ({
+      month: m,
+      checked: v.checked,
+      defects: v.defects,
+      passPct: v.passPct,
+      // The importer already prefers the typed column; this covers a month whose
+      // rate was never filed at all, so the table has a figure either way.
+      defectPct: v.defectPct ?? pct(v.defects, v.checked)
+    }))
     .sort((a, b) => a.month.localeCompare(b.month));
 
-  const withFigures = list.filter((m) => m.checked > 0 || m.defects > 0 || m.passPct != null);
+  const withFigures = list.filter(
+    (m) => m.checked > 0 || m.defects > 0 || m.passPct != null || m.defectPct != null
+  );
   const checked = list.reduce((sum, m) => sum + m.checked, 0);
   const defects = list.reduce((sum, m) => sum + m.defects, 0);
+  const latest = withFigures[withFigures.length - 1] ?? null;
 
   return {
     hasData: withFigures.length > 0,
     months: list,
-    latest: withFigures[withFigures.length - 1] ?? null,
+    latest,
     checked,
     defects,
-    defectPct: pct(defects, checked)
+    // Across several months the pieces are what can honestly be added up; a single
+    // month with no counts falls back to the rate that month reported.
+    defectPct: pct(defects, checked) ?? latest?.defectPct ?? null
   };
 }
 
@@ -1041,21 +1186,19 @@ function buildFinalAudit(rows: FinalInspectionRow[], months: string[]): FinalAud
  * they are excluded here rather than summed alongside their own components.
  */
 export async function fetchQualityOverview(): Promise<QualityOverview> {
-  const [
-    { data: insData, error: insError },
-    { data: defData, error: defError },
-    { data: lineData, error: lineError }
-  ] = await Promise.all([
-    supabase
+  const [insData, defData, { data: lineData, error: lineError }] = await Promise.all([
+    fetchAllRows<InspectionRow>((from, to) => supabase
       .from('quality_inspections')
       .select('line_no,line_label,inspection_date,period_month,stage,checked_qty,pass_qty,defect_qty,pass_pct')
       .eq('is_factory', false)
       .order('inspection_date', { ascending: false })
-      .limit(5000),
-    supabase
+      .order('id')
+      .range(from, to)),
+    fetchAllRows<{ category: string; qty: number; is_factory: boolean }>((from, to) => supabase
       .from('quality_defects')
       .select('category,qty,is_factory')
-      .limit(5000),
+      .order('id')
+      .range(from, to)),
     supabase
       .from('production_lines')
       .select('line_number,line_name')
@@ -1063,17 +1206,20 @@ export async function fetchQualityOverview(): Promise<QualityOverview> {
       .order('line_number')
   ]);
 
-  if (insError) throw new Error(insError.message);
-  if (defError) throw new Error(defError.message);
   if (lineError) throw new Error(lineError.message);
 
-  const all = reportable((insData ?? []) as InspectionRow[]);
+  const all = reportable(insData);
   const daily = all.filter((r) => r.inspection_date);
   const monthly = all.filter((r) => !r.inspection_date && r.period_month);
 
+  // Per line, as the Quality Management screen decides it: a line filed monthly
+  // still counts when the line beside it is filed daily, and no line is ever
+  // counted at both grains.
+  const gatesFiledDaily = new Set(daily.map(gateKeyOf));
+  const rows = [...daily, ...monthly.filter((r) => !gatesFiledDaily.has(gateKeyOf(r)))];
   const basis: 'daily' | 'monthly' = daily.length > 0 ? 'daily' : 'monthly';
-  const rows = basis === 'daily' ? daily : monthly;
-  const dateOf = (r: InspectionRow) => (basis === 'daily' ? r.inspection_date! : r.period_month!);
+  const dateOf = (r: InspectionRow) =>
+    (basis === 'daily' ? r.inspection_date : r.period_month);
 
   let checked = 0;
   let defects = 0;
@@ -1106,19 +1252,22 @@ export async function fetchQualityOverview(): Promise<QualityOverview> {
     checked += c;
     defects += d;
 
-    const key = r.line_no != null ? String(r.line_no) : (r.line_label ?? '—');
+    const key = lineKeyOf(r);
     const ln = lineMap.get(key)
       ?? { lineNo: r.line_no, label: r.line_label ?? `Line ${key}`, checked: 0, defects: 0 };
     lineMap.set(key, { ...ln, checked: ln.checked + c, defects: ln.defects + d });
 
+    // The trend keeps one grain, so a row filed at the other one counts towards
+    // the totals and its line, and sits out of the day-by-day series.
     const day = dateOf(r);
+    if (day == null) continue;
     const dy = dayMap.get(day) ?? { checked: 0, defects: 0 };
     dayMap.set(day, { checked: dy.checked + c, defects: dy.defects + d });
   }
 
   // Defect rows follow the same roll-up rule, but the monthly summaries record
   // everything at factory level -- excluding those would leave nothing at all.
-  const defRows = (defData ?? []) as { category: string; qty: number; is_factory: boolean }[];
+  const defRows = defData;
   const gatedRows = defRows.some((d) => defectStage(d.category) != null)
     ? defRows.filter((d) => {
         const stage = defectStage(d.category);

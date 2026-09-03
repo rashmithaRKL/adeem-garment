@@ -189,12 +189,17 @@ export function TemplateLibrary({
     </span>
   );
 
+  // Spaced on both sides, not just above: collapsed to its summary row this card
+  // is a thin bar, and with a margin only on top it sat flush against whatever
+  // followed it and read as part of that block rather than as its own.
+  const spacing = { margin: 'var(--space-4) 0' };
+
   if (!collapsible) {
-    return <Card title={title} style={{ marginTop: 16 }} aside={badge}>{body}</Card>;
+    return <Card title={title} style={spacing} aside={badge}>{body}</Card>;
   }
 
   return (
-    <Card style={{ marginTop: 16 }}>
+    <Card style={spacing}>
       <details>
         <summary style={{ cursor: 'pointer', display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <span className="card__title">{title}</span>

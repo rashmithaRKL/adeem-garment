@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import {
-  RANGE_HINT, RANGE_LABEL, RANGE_STEP, monthStart, spanLabel, stepAnchor, today,
+  RANGE_HINT, RANGE_LABEL, RANGE_STEP, spanLabel, stepAnchor,
   type QualityRange, type QualitySpan
 } from './period';
 
@@ -17,43 +17,37 @@ const RANGES: QualityRange[] = ['day', 'week', 'month'];
  * rather than a hand-built calendar: it is already localised, keyboard-navigable
  * and familiar on the tablets the floor uses.
  *
+ * The field is deliberately unbounded. It used to be clamped to the range the
+ * reports themselves covered, which reads as a broken calendar rather than as a
+ * helpful limit: months greyed out with no reason given, and no way to check a
+ * month before the earliest import or to look ahead at one not yet filed. Asking
+ * for a period with nothing in it is a fair question, and the empty state answers
+ * it in words. The three range buttons are the shortcut to where the figures
+ * actually are; the calendar is for going wherever the user means to go.
+ *
  * Shared by the Quality Management screen and the Production Lines screen rather
  * than copied into both: the two read the same inspection rows through the same
  * builder, and a control that drifted apart on one of them would put two different
  * pass rates for the same line on two screens at once.
  */
 export function QualityPeriodPicker({
-  span, latest, earliest, onRange, onAnchor, note
+  span, latest, onRange, onAnchor, note
 }: {
   span: QualitySpan;
-  /** Newest date the reports reach; the arrows and the field stop here. */
+  /** Newest date the reports reach — offered by the "Latest" shortcut. */
   latest: string | null;
-  /** Oldest date the reports reach; the field will not go below it. */
-  earliest: string | null;
   onRange: (range: QualityRange) => void;
   onAnchor: (anchor: string | null) => void;
   note?: ReactNode;
 }) {
-  // The ceiling is today or the newest report, whichever is later: a factory that
-  // has not filed yet this week must still be able to ask about this week, and one
-  // whose sheet is dated ahead must still be able to reach it.
-  const now = today();
-  const max = latest != null && latest > now ? latest : now;
-  const min = earliest ?? undefined;
   const isMonth = span.range === 'month';
 
   const stepTo = (step: -1 | 1) => stepAnchor(span.range, span.anchor, step);
-  const nextAnchor = stepTo(1);
-  // Stepping forward is blocked once the window already reaches the ceiling,
-  // rather than letting the user walk into empty months for ever.
-  const atLatest = (isMonth ? monthStart(span.anchor) >= monthStart(max) : span.to >= max);
-  const atEarliest = min != null && span.from <= min;
 
   const pick = (value: string) => {
     if (!value) return;
     // A month field hands back "2026-08"; the anchor is always a full date.
-    const anchor = isMonth ? value + '-01' : value;
-    onAnchor(anchor > max ? max : anchor);
+    onAnchor(isMonth ? value + '-01' : value);
   };
 
   return (
@@ -68,8 +62,10 @@ export function QualityPeriodPicker({
             className={'segmented__btn' + (span.range === r ? ' segmented__btn--on' : '')}
             aria-pressed={span.range === r}
             title={RANGE_LABEL[r] + ' — ' + RANGE_HINT[r]}
-            // The anchor is kept when the range changes: a manager looking at
-            // Friday who asks for the week means the week Friday falls in.
+            // These three are the shortcut to where the figures are: the screen
+            // answers a range change by moving to the newest day, week or month
+            // that carries any. Browsing to a particular period is the calendar's
+            // job, and it is free to go anywhere.
             onClick={() => onRange(r)}
           >
             {RANGE_LABEL[r]}
@@ -79,7 +75,7 @@ export function QualityPeriodPicker({
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <Step label={'Previous ' + RANGE_STEP[span.range]} glyph="‹"
-          disabled={atEarliest} onClick={() => onAnchor(stepTo(-1))} />
+          onClick={() => onAnchor(stepTo(-1))} />
 
         <input
           className="input"
@@ -91,13 +87,11 @@ export function QualityPeriodPicker({
           // A week shows its Monday, not the day that was clicked: the field then
           // reads as the week it selected rather than as an arbitrary date inside it.
           value={isMonth ? span.anchor.slice(0, 7) : span.range === 'week' ? span.from : span.anchor}
-          min={isMonth ? min?.slice(0, 7) : min}
-          max={isMonth ? max.slice(0, 7) : max}
           onChange={(e) => pick(e.target.value)}
         />
 
         <Step label={'Next ' + RANGE_STEP[span.range]} glyph="›"
-          disabled={atLatest} onClick={() => onAnchor(nextAnchor > max ? max : nextAnchor)} />
+          onClick={() => onAnchor(stepTo(1))} />
       </div>
 
       <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
@@ -122,10 +116,10 @@ export function QualityPeriodPicker({
   );
 }
 
-/** One arrow. Disabled at the ends of the history rather than hidden, so the
- *  control keeps its shape and its position on the row. */
-function Step({ label, glyph, disabled, onClick }: {
-  label: string; glyph: string; disabled: boolean; onClick: () => void;
+/** One arrow. It always steps: the window it lands on is allowed to be empty, and
+ *  the screen says so in words rather than by refusing to move. */
+function Step({ label, glyph, onClick }: {
+  label: string; glyph: string; onClick: () => void;
 }) {
   return (
     <button
@@ -133,12 +127,8 @@ function Step({ label, glyph, disabled, onClick }: {
       className="btn btn--ghost"
       aria-label={label}
       title={label}
-      disabled={disabled}
       onClick={onClick}
-      style={{
-        padding: '6px 11px', fontSize: 16, lineHeight: 1,
-        opacity: disabled ? 0.35 : 1, cursor: disabled ? 'default' : 'pointer'
-      }}
+      style={{ padding: '6px 11px', fontSize: 16, lineHeight: 1, cursor: 'pointer' }}
     >
       {glyph}
     </button>

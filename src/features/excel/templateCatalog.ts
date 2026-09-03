@@ -601,6 +601,9 @@ const qualityFinalInspection: UploadTemplate = {
     { header: 'Deffects', requirement: 'recommended', format: 'Whole number',
       meaning: 'Defective pieces found in the sample. Spelled as the sheet spells it; "Defects" is read too.',
       alsoAccepted: ['Defects'] },
+    { header: 'Defect %', requirement: 'optional', format: 'Number or percentage',
+      meaning: 'Defective share of the sample. Kept as typed where it is filled in; left blank it is worked out from Deffects over Sample Inspected, so the column costs nothing to skip.',
+      alsoAccepted: ['Defect Rate'] },
     { header: 'Qty Shipped', requirement: 'optional', format: 'Whole number',
       meaning: 'Pieces shipped that month.' },
     { header: '1st time Pass Rate', requirement: 'recommended', format: 'Number or percentage',
@@ -609,7 +612,8 @@ const qualityFinalInspection: UploadTemplate = {
       meaning: 'Every column after the pass rate is read as a defect category: Fabric, Sewing, Washing, Packing, and any other you add.' }
   ],
   notes: [
-    'Column order matters here: Month, Sample Inspected, Deffects, Qty Shipped, 1st time Pass Rate, and then the defect categories.',
+    'Column order matters here: Month, Sample Inspected, Deffects, Defect %, Qty Shipped, 1st time Pass Rate, and then the defect categories.',
+    'Defect % is headed in the singular, so it is never mistaken for the "Deffects" count beside it. Write it as 1.44 or 1.44% — both are read the same way.',
     'Those categories are tagged as final-inspection defects on import, so they are never mixed with sewing-floor defects on the charts.',
     'A month left empty is skipped rather than charted as a collapse to 0%, so the sheet can be uploaded at any point in the year.'
   ],
@@ -617,27 +621,30 @@ const qualityFinalInspection: UploadTemplate = {
     const examples = filledMonths();
     const figures: Record<number, unknown[]> = {};
     examples.forEach((m, i) => {
-      figures[m] = [[1250, 18, 42000, 93.75, 4, 7, 2, 3, 2],
-        [1180, 12, 39600, 95.83, 2, 5, 1, 2, 2],
-        [960, 9, 31400, 96.15, 1, 4, 1, 2, 1]][i] ?? [];
+      // Defect % sits beside the count it comes from — 18 of 1250 is 1.44 — so the
+      // example rows show the two agreeing rather than leaving the reader to guess
+      // which way round the percentage runs.
+      figures[m] = [[1250, 18, 1.44, 42000, 93.75, 4, 7, 2, 3, 2],
+        [1180, 12, 1.02, 39600, 95.83, 2, 5, 1, 2, 2],
+        [960, 9, 0.94, 31400, 96.15, 1, 4, 1, 2, 1]][i] ?? [];
     });
     return [{
       name: 'Summary',
-      widths: [12, 16, 10, 12, 17, 10, 10, 10, 10, 13],
+      widths: [12, 16, 10, 11, 12, 17, 10, 10, 10, 10, 13],
       rows: [
         [`FINAL INSPECTION SUMMARY ${thisYear()}`],
-        ['Month', 'Sample Inspected', 'Deffects', 'Qty Shipped', '1st time Pass Rate',
+        ['Month', 'Sample Inspected', 'Deffects', 'Defect %', 'Qty Shipped', '1st time Pass Rate',
           'Fabric', 'Sewing', 'Washing', 'Packing', 'Measurement'],
         ...MONTHS.map((name, i) => [name, ...(figures[i] ?? [])])
       ],
       style: {
-        width: 10,
+        width: 11,
         title: [0],
         headers: [1],
         data: [2, 13],
         examples: examples.map((m) => m + 2),
-        integers: [1, 2, 3, 5, 6, 7, 8, 9],
-        percents: [4],
+        integers: [1, 2, 4, 6, 7, 8, 9, 10],
+        percents: [3, 5],
         required: [0, 1],
         filter: true
       }

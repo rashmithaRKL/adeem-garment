@@ -57,6 +57,32 @@ const pct = (v: unknown): number | null => {
   return Math.min(Math.round(value * 100) / 100, 9999.99);
 };
 
+/**
+ * A defect rate, which is the one percentage on these sheets that is routinely
+ * below one per cent — so pct()'s rule above would read a perfectly ordinary
+ * 0.94% as 94%, and a good month would import as a catastrophe.
+ *
+ * The counts beside it settle the scale wherever they exist: of the two readings
+ * (0.94 and 94), the one nearer defects over checked is the one the typist meant.
+ * With no counts to check against the number is taken as typed, because that is
+ * the plain-number column the template asks for.
+ */
+const defectRate = (
+  v: unknown, defectQty: number | null, checked: number | null
+): number | null => {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/[,\s%]/g, ''));
+  if (!Number.isFinite(n) || n < 0) return null;
+  const asTyped = Math.min(Math.round(n * 100) / 100, 9999.99);
+  // Above 1 there is nothing to decide: no sample is more than 100% defective,
+  // so the cell can only already be a percentage.
+  if (n > 1) return asTyped;
+  if (!checked || defectQty == null) return asTyped;
+  const asFraction = Math.round(n * 10_000) / 100;
+  const actual = (defectQty / checked) * 100;
+  return Math.abs(asFraction - actual) < Math.abs(asTyped - actual) ? asFraction : asTyped;
+};
+
 const isoDay = (d: Date): string =>
   new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 
@@ -568,11 +594,14 @@ function parseMonthlyInspection(wb: XLSX.WorkBook, fileName: string): QualityPar
   const col = (patterns: RegExp[]) => findCol(header, 0, header.length - 1, patterns);
   const cSample = col([/^sampleinspected$/, /sampleinspected/]);
   const cDefects = col([/^deffects$/, /^defects$/]);
+  // Singular on purpose: "%" is stripped before matching, so a plural heading here
+  // would be the same string as the "Defects" count column beside it.
+  const cDefectRate = col([/^defect$/, /^defectrate$/, /^defectpct$/]);
   const cPassRate = col([/1sttimepassrate/, /passrate/]);
   const cShipped = col([/^qtyshipped$/]);
 
   // Everything after the rate columns is a defect category (Fabric, Sewing, ...).
-  const firstCategory = Math.max(cPassRate, cDefects, cSample) + 1;
+  const firstCategory = Math.max(cPassRate, cDefects, cDefectRate, cSample) + 1;
   const categories: { col: number; name: string }[] = [];
   for (let i = firstCategory; i < header.length; i += 1) {
     const label = text(header[i]);
@@ -592,11 +621,14 @@ function parseMonthlyInspection(wb: XLSX.WorkBook, fileName: string): QualityPar
     const checked = int(at(row, cSample));
     const defectQty = int(at(row, cDefects));
     const passPct = pct(at(row, cPassRate));
+    const reportedDefectPct = defectRate(at(row, cDefectRate), defectQty, checked);
     const shipped = int(at(row, cShipped));
 
     // A month the client has not filled in yet is all zeroes; importing it would
-    // draw a cliff to 0% on every chart.
-    const hasFigures = (checked ?? 0) > 0 || (defectQty ?? 0) > 0 || (shipped ?? 0) > 0;
+    // draw a cliff to 0% on every chart. The two rates count too — a month can
+    // arrive with only a percentage filled in, ahead of the piece counts.
+    const hasFigures = (checked ?? 0) > 0 || (defectQty ?? 0) > 0 || (shipped ?? 0) > 0
+      || passPct != null || reportedDefectPct != null;
     if (hasFigures) {
       // Deliberately not derived here. "1st time Pass Rate" counts styles that
       // passed first time (7 of 8), while Sample Inspected and Deffects count
@@ -606,9 +638,12 @@ function parseMonthlyInspection(wb: XLSX.WorkBook, fileName: string): QualityPar
         lineNo: null, lineLabel: 'Factory', isFactory: true, styleNumber: null,
         inspectionDate: null, periodMonth: month, stage: 'final',
         checkedQty: checked, passQty: null, defectQty, passPct,
-        defectPct: checked && defectQty != null
+        // The typed column wins where the sheet fills it in: a factory that states
+        // its own defect rate is stating something about how it counts, and the
+        // division below is only a courtesy for the sheets that leave it blank.
+        defectPct: reportedDefectPct ?? (checked && defectQty != null
           ? Math.round((defectQty / checked) * 10_000) / 100
-          : null
+          : null)
       });
     }
 

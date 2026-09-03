@@ -10,8 +10,8 @@ import { friendlyError } from '@/lib/errors';
 import { fetchLinePerformance } from '@/features/dashboard/queries';
 import { useRealtimeDashboard } from '@/features/dashboard/useRealtimeDashboard';
 import {
-  fetchQualityRecords, buildQualityMatrix, datasetGrain, earliestDate, latestDate, openingDate,
-  FLOOR_STAGES, type QualityRecords
+  fetchQualityRecords, buildQualityMatrix, datasetGrain, latestDate, openingDate,
+  openingAnchorFor, FLOOR_STAGES, type QualityRecords
 } from '@/features/quality/queries';
 import { spanFor, spanLabel, today, type QualityRange } from '@/features/quality/period';
 import { QualityPeriodPicker } from '@/features/quality/QualityPeriodPicker';
@@ -64,7 +64,6 @@ export function LinesPage() {
 
   const records = quality.data ?? NO_QUALITY;
   const latest = latestDate(records);
-  const earliest = earliestDate(records);
   const span = spanFor(
     range ?? (datasetGrain(records) === 'daily' ? 'day' : 'month'),
     anchor ?? openingDate(records) ?? today()
@@ -130,8 +129,7 @@ export function LinesPage() {
         <QualityPeriodPicker
           span={span}
           latest={latest}
-          earliest={earliest}
-          onRange={setRange}
+          onRange={(r) => { setRange(r); setAnchor(openingAnchorFor(r, records)); }}
           onAnchor={setAnchor}
           note={<>Quality figures on each card only. Checked and defects are {floorNote}.</>}
         />

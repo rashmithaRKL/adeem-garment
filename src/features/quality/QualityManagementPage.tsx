@@ -8,8 +8,8 @@ import { formatDate, formatNumber } from '@/lib/format';
 import { EFFICIENCY_THRESHOLD } from '@/lib/env';
 import { useAuth } from '@/features/auth/AuthProvider';
 import {
-  fetchQualityRecords, buildQualityMatrix, buildTrend, datasetGrain, earliestDate, latestDate,
-  FLOOR_STAGES, DEFECT_STAGES, openingDate,
+  fetchQualityRecords, buildQualityMatrix, buildTrend, datasetGrain, latestDate,
+  FLOOR_STAGES, DEFECT_STAGES, openingDate, openingAnchorFor,
   type FinalLineStat, type FinalStatus, type LineQualityRow, type QualityGrain,
   type QualityMatrix, type QualityRecords, type StageStat
 } from './queries';
@@ -65,6 +65,38 @@ const FINAL_COLOR: Record<FinalStatus, string> = {
 const pctText = (n: number | null): string => (n == null ? '—' : n.toFixed(1) + '%');
 
 /**
+ * The ring for "Top 5 defects", made to add up to the defects found at the gates
+ * it breaks down — the figure the tile above already shows.
+ *
+ * Two things used to go missing from the middle of it. The list is capped at five,
+ * so a sixth category was dropped from a total still labelled plainly "defects";
+ * and the categories are typed into their own block on the sheet, so they can
+ * account for fewer defects than the gate columns beside them — 89 of 91, in the
+ * report that prompted this. Both are shown as their own slice rather than left
+ * out, because a ring whose centre disagrees with the tile above it is read as a
+ * broken number, and the honest answer to "where are the other two" is a label.
+ *
+ * A breakdown that runs *ahead* of the gate columns is left to stand on its own:
+ * one piece can carry two defects, so categories outnumbering pieces is a real
+ * reading of a sheet rather than something to reconcile away.
+ */
+function defectSlices(matrix: QualityMatrix) {
+  const slices = matrix.topDefects.map((d, i) => ({
+    label: d.category, value: d.qty, color: seriesColor(i)
+  }));
+  const shown = matrix.topDefects.reduce((sum, d) => sum + d.qty, 0);
+  const tail = matrix.defectsCategorised - shown;
+  if (tail > 0) {
+    slices.push({ label: 'Other categories', value: tail, color: seriesColor(slices.length) });
+  }
+  const unCategorised = matrix.defectsAtBreakdownGates - matrix.defectsCategorised;
+  if (unCategorised > 0) {
+    slices.push({ label: 'Not broken down', value: unCategorised, color: 'var(--text-faint)' });
+  }
+  return slices;
+}
+
+/**
  * An empty window is almost never an empty database, so the message says which of
  * the two it is and where the figures actually are. "No data" on a screen holding
  * a year of reports is the kind of message that gets a working import declared
@@ -105,7 +137,6 @@ export function QualityManagementPage() {
   const data = records.data ?? NO_RECORDS;
 
   const latest = latestDate(data);
-  const earliest = earliestDate(data);
   const span = spanFor(
     range ?? (datasetGrain(data) === 'daily' ? 'day' : 'month'),
     anchor ?? openingDate(data) ?? today()
@@ -135,8 +166,7 @@ export function QualityManagementPage() {
       <QualityPeriodPicker
         span={span}
         latest={latest}
-        earliest={earliest}
-        onRange={setRange}
+        onRange={(r) => { setRange(r); setAnchor(openingAnchorFor(r, data)); }}
         onAnchor={setAnchor}
         note={<>
           Pass{showRejection && ', rejection'} and final inspection are judged against
@@ -254,9 +284,7 @@ export function QualityManagementPage() {
             <Donut
               size={158}
               centerLabel="defects"
-              slices={matrix.topDefects.map((d, i) => ({
-                label: d.category, value: d.qty, color: seriesColor(i)
-              }))}
+              slices={defectSlices(matrix)}
               empty={'No defect categories were recorded in ' + spanLabel(span) + '.'}
             />
             <p style={{ margin: '12px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
@@ -266,6 +294,9 @@ export function QualityManagementPage() {
                   + 'counts are rework rather than defects leaving the line, and are left out here.'
                 : 'The reports imported for this period do not say which gate each category was '
                   + 'counted at, so every category they carry is shown.'}
+              {' '}The ring adds up to the {formatNumber(matrix.defectsAtBreakdownGates)} defects
+              found at {stageList(matrix.defectsGated ? DEFECT_STAGES : FLOOR_STAGES).toLowerCase()},
+              so it reads against the tile above rather than against a total of its own.
               {' '}Counted over {spanLabel(span)}.
             </p>
           </Card>
@@ -645,6 +676,7 @@ function FinalAuditCard({ audit, span }: {
                   <th>Month</th>
                   <th className="num">Sample</th>
                   <th className="num">Defects</th>
+                  <th className="num">Defect %</th>
                   <th className="num">First-time pass</th>
                 </tr>
               </thead>
@@ -654,6 +686,9 @@ function FinalAuditCard({ audit, span }: {
                     <td>{monthLabel(m.month)}</td>
                     <td className="num">{formatNumber(m.checked)}</td>
                     <td className="num">{formatNumber(m.defects)}</td>
+                    <td className="num" style={{ color: 'var(--text-muted)' }}>
+                      {pctText(m.defectPct)}
+                    </td>
                     <td className="num" style={{
                       fontWeight: 600,
                       color: m.passPct == null
@@ -672,7 +707,8 @@ function FinalAuditCard({ audit, span }: {
             The first-time pass rate counts styles that cleared the audit at the first
             attempt; sample and defects count pieces. The report measures them that way, so
             they are shown that way rather than reconciled — and neither is added into the
-            per-line totals above.
+            per-line totals above. Defect % is the report's own column where the sheet
+            fills it in, and defects over sample where it leaves it blank.
           </p>
         </>
       )}
