@@ -118,7 +118,9 @@ export async function importQuality(
           pass_qty: r.passQty,
           defect_qty: r.defectQty,
           pass_pct: r.passPct,
-          defect_pct: r.defectPct
+          defect_pct: r.defectPct,
+          verdict: r.verdict ?? null,
+          shared_lines: r.sharedLines?.length ? r.sharedLines : null
         }))
       );
       if (error) throw new Error(error.message);

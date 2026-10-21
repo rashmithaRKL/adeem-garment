@@ -615,7 +615,9 @@ const qualityFinalInspection: UploadTemplate = {
     'Column order matters here: Month, Sample Inspected, Deffects, Defect %, Qty Shipped, 1st time Pass Rate, and then the defect categories.',
     'Defect % is headed in the singular, so it is never mistaken for the "Deffects" count beside it. Write it as 1.44 or 1.44% — both are read the same way.',
     'Those categories are tagged as final-inspection defects on import, so they are never mixed with sewing-floor defects on the charts.',
-    'A month left empty is skipped rather than charted as a collapse to 0%, so the sheet can be uploaded at any point in the year.'
+    'A month left empty is skipped rather than charted as a collapse to 0%, so the sheet can be uploaded at any point in the year.',
+    'Month tabs (JAN, FEB, … DEC) beside the Summary are read too: one style per row with Date, Style, Sample Size, Major Defects, Pass/Fail and Line #. Each row is one final inspection for the line it names — write "1 & 4" for a style two lines shared — and these are what the line-by-line final inspection is built from.',
+    'Upload the same workbook again as each month is added. A month in the newer upload replaces that month from the older one, so nothing is counted twice.'
   ],
   build: () => {
     const examples = filledMonths();

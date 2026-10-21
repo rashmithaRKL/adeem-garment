@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import type {
-  DefectRow, InspectionRow, QualityParseResult, QualityReportKind, QualityStage
+  DefectRow, FinalVerdict, InspectionRow, QualityParseResult, QualityReportKind, QualityStage
 } from './types';
 import { REPORT_LABEL } from './types';
 import { isHelperSheet } from '@/features/excel/guideSheet';
@@ -579,12 +579,195 @@ function parseMonthlyQuality(wb: XLSX.WorkBook, fileName: string): QualityParseR
  * floor defects and the final inspection had no breakdown of its own.
  */
 const finalGate = (name: string): string =>
-  /final/i.test(name) ? name.trim() : `${name.trim()} (Final)`;
+  /\bfinal\b/i.test(name) ? name.trim() : `${name.trim()} (Final)`;
+
+/** "SEP", "Sept", "JUNE", "Jan 2026" -> 0-based month; null for any other tab name. */
+function monthOfSheet(name: string): number | null {
+  const k = norm(name).replace(/\d+/g, '');
+  if (k.length < 3) return null;
+  const idx = MONTHS.findIndex((m) => m.startsWith(k));
+  return idx < 0 ? null : idx;
+}
+
+/** "PASS", "pass ", "Fail" -> the verdict; anything else is a row not yet judged. */
+function verdictOf(v: unknown): FinalVerdict | null {
+  const k = norm(v);
+  if (k.startsWith('pass')) return 'pass';
+  if (k.startsWith('fail')) return 'fail';
+  return null;
+}
+
+/** 3, "3", "1 & 4" -> every line the cell names. A shared style names more than one. */
+function linesIn(cell: unknown): number[] {
+  if (typeof cell === 'number') return Number.isInteger(cell) && cell > 0 ? [cell] : [];
+  const found = (String(cell ?? '').match(/\d+/g) ?? []).map(Number).filter((n) => n > 0);
+  return [...new Set(found)];
+}
+
+const lineName = (lineNo: number): string => `Line ${String(lineNo).padStart(2, '0')}`;
+
+interface FinalTab {
+  name: string;
+  month: number;
+  grid: Grid;
+  header: number;
+  cols: { date: number; style: number; sample: number; defects: number; verdict: number; line: number };
+}
+
+/**
+ * The month tabs of the final inspection report: one row per style inspected, each
+ * with its sample, its major defects, the line that sewed it and a PASS or FAIL.
+ * A tab is recognised by its name being a month and by the Pass/Fail and Line #
+ * headings — the Summary, OQL and defect-summary tabs have neither.
+ */
+function finalTabs(wb: XLSX.WorkBook, summary: string): FinalTab[] {
+  const tabs: FinalTab[] = [];
+  for (const name of wb.SheetNames) {
+    if (name === summary || isHelperSheet(name)) continue;
+    const month = monthOfSheet(name);
+    if (month == null) continue;
+    const grid = readGrid(wb.Sheets[name]!);
+    for (let r = 0; r < Math.min(grid.length, 15); r += 1) {
+      const sub = grid[r]!;
+      const col = (patterns: RegExp[]) => findCol(sub, 0, sub.length - 1, patterns);
+      // "Pass/Fail\nAQL 2.5" and "Line #" once the punctuation is gone.
+      const verdict = col([/^passfail/]);
+      const line = col([/^line$/, /^lineno$/, /^teamno$/]);
+      if (verdict < 0 || line < 0) continue;
+      tabs.push({
+        name, month, grid, header: r,
+        cols: {
+          verdict, line,
+          date: col([/^date$/]),
+          style: col([/^style$/, /^styleno$/]),
+          sample: col([/^samplesize$/, /^sample/]),
+          defects: col([/^majordefects?$/, /^majordefect/, /^defects?$/])
+        }
+      });
+      break;
+    }
+  }
+  return tabs;
+}
+
+/**
+ * The year the workbook is about, read from the dates its tabs carry. The file is
+ * called FINAL.xlsx and its month names carry no year, so falling back on the
+ * clock alone would file 2026's December under 2027 the first time it was
+ * uploaded in January.
+ */
+function yearOfTabs(tabs: FinalTab[]): number | null {
+  const count = new Map<number, number>();
+  for (const t of tabs) {
+    if (t.cols.date < 0) continue;
+    for (let r = t.header + 1; r < t.grid.length; r += 1) {
+      const day = toDate(t.grid[r]![t.cols.date]);
+      if (!day) continue;
+      const y = Number(day.slice(0, 4));
+      count.set(y, (count.get(y) ?? 0) + 1);
+    }
+  }
+  let best: number | null = null;
+  for (const [y, n] of count) if (best == null || n > count.get(best)!) best = y;
+  return best;
+}
+
+/**
+ * The defect columns to the right of Line #, named with the group banner above
+ * them ("Sewing: Puckering / Waveness") — the bare sub-headings repeat across
+ * groups ("Shade" under both Fabric and Presentation) and some mean nothing on
+ * their own ("Less", "Puls" under Measurements).
+ */
+function tabCategories(tab: FinalTab): { col: number; name: string }[] {
+  const header = tab.grid[tab.header]!;
+  const banner = tab.grid[tab.header - 1] ?? [];
+  const groupAt = (col: number): string | null => {
+    for (let i = col; i > tab.cols.line; i -= 1) {
+      const label = text(banner[i]);
+      if (label && !isNumeric(label)) return label.replace(/\s+/g, ' ').trim();
+    }
+    return null;
+  };
+  const out: { col: number; name: string }[] = [];
+  header.forEach((cell, i) => {
+    if (i <= tab.cols.line) return;
+    const label = text(cell);
+    if (!label || isNumeric(label)) return;
+    const own = label.replace(/\s+/g, ' ').trim();
+    const group = groupAt(i);
+    out.push({ col: i, name: finalGate(group ? `${group}: ${own}` : own) });
+  });
+  return out;
+}
+
+/**
+ * One inspection row per style judged on a tab, and its defects by category.
+ *
+ * A style is dated twice: the day it was inspected, and the month of the tab it
+ * was filed on. The two differ at month ends — styles inspected on 31 August sit
+ * on the SEP tab, and the Summary counts them in September — so both are kept and
+ * the screens decide which one a window follows.
+ */
+function readFinalTab(tab: FinalTab, year: number) {
+  const month = `${year}-${String(tab.month + 1).padStart(2, '0')}-01`;
+  const { cols } = tab;
+  const categories = tabCategories(tab);
+  const inspections: InspectionRow[] = [];
+  const defects: DefectRow[] = [];
+  const lines = new Set<number>();
+
+  for (let r = tab.header + 1; r < tab.grid.length; r += 1) {
+    const row = tab.grid[r]!;
+    // The Total row closes the table; the style and defect tallies under it are
+    // the sheet's own arithmetic, not more styles.
+    if (row.slice(0, 2).some((c) => norm(c) === 'total')) break;
+
+    const verdict = verdictOf(at(row, cols.verdict));
+    const sample = int(at(row, cols.sample));
+    // The blank template rows carry a 0 sample, and one carries a stray "pass".
+    if (!verdict || sample == null || sample <= 0) continue;
+
+    const named = linesIn(at(row, cols.line));
+    named.forEach((n) => lines.add(n));
+    const lineNo = named[0] ?? null;
+    const lineLabel = lineNo != null ? lineName(lineNo) : null;
+    const inspectionDate = toDate(at(row, cols.date));
+    const major = int(at(row, cols.defects));
+
+    inspections.push({
+      lineNo, lineLabel, isFactory: false,
+      styleNumber: text(at(row, cols.style)),
+      inspectionDate, periodMonth: month,
+      stage: 'final',
+      checkedQty: sample,
+      passQty: null,
+      defectQty: major,
+      passPct: null,
+      defectPct: major != null ? Math.round((major / sample) * 10_000) / 100 : null,
+      verdict,
+      sharedLines: named.slice(1)
+    });
+
+    // Defects go to the first line named only: the breakdown is read as a factory
+    // total, and crediting a shared style's defects twice would inflate it.
+    for (const cat of categories) {
+      const qty = int(row[cat.col]);
+      if (qty == null || qty <= 0) continue;
+      defects.push({
+        lineNo, lineLabel, isFactory: false,
+        inspectionDate, periodMonth: month, category: cat.name, qty
+      });
+    }
+  }
+  return { inspections, defects, lines };
+}
 
 function parseMonthlyInspection(wb: XLSX.WorkBook, fileName: string): QualityParseResult {
-  const year = yearFromName(fileName);
   const sheetName = wb.SheetNames.find((n) => norm(n) === 'summary');
   if (!sheetName) throw new Error('This workbook has no "Summary" sheet to read.');
+
+  const tabs = finalTabs(wb, sheetName);
+  const year = yearOfTabs(tabs) ?? yearFromName(fileName);
 
   const grid = readGrid(wb.Sheets[sheetName]!);
   const headerIdx = grid.findIndex((r) => norm(r[0]) === 'month');
@@ -626,9 +809,11 @@ function parseMonthlyInspection(wb: XLSX.WorkBook, fileName: string): QualityPar
 
     // A month the client has not filled in yet is all zeroes; importing it would
     // draw a cliff to 0% on every chart. The two rates count too — a month can
-    // arrive with only a percentage filled in, ahead of the piece counts.
+    // arrive with only a percentage filled in, ahead of the piece counts — but
+    // only above zero: the factory's own sheet keeps a 0 in "1st time Pass Rate"
+    // for every month it has not reached, and that 0 is a blank, not a rate.
     const hasFigures = (checked ?? 0) > 0 || (defectQty ?? 0) > 0 || (shipped ?? 0) > 0
-      || passPct != null || reportedDefectPct != null;
+      || (passPct ?? 0) > 0 || (reportedDefectPct ?? 0) > 0;
     if (hasFigures) {
       // Deliberately not derived here. "1st time Pass Rate" counts styles that
       // passed first time (7 of 8), while Sample Inspected and Deffects count
@@ -648,7 +833,12 @@ function parseMonthlyInspection(wb: XLSX.WorkBook, fileName: string): QualityPar
     }
 
     for (const cat of categories) {
-      const qty = int(row[cat.col]);
+      const raw = row[cat.col];
+      // Newer copies of the sheet hold each category as a share of the sample
+      // (0.0057) rather than a count. Rounded, that is a 0 or a phantom 1; the
+      // counts come from the month tabs instead.
+      if (typeof raw === 'number' && !Number.isInteger(raw)) continue;
+      const qty = int(raw);
       if (qty == null || qty === 0) continue;
       defects.push({
         lineNo: null, lineLabel: 'Factory', isFactory: true,
@@ -657,11 +847,31 @@ function parseMonthlyInspection(wb: XLSX.WorkBook, fileName: string): QualityPar
     }
   }
 
+  // The month tabs are what the line-by-line final inspection is built from: the
+  // Summary above is one factory-wide row per month and names no line at all.
+  const used = [sheetName];
+  const skipped: { sheet: string; reason: string }[] = [];
+  const linesSeen = new Set<number>();
+  for (const tab of tabs) {
+    const read = readFinalTab(tab, year);
+    read.lines.forEach((n) => linesSeen.add(n));
+    if (!read.inspections.length) {
+      skipped.push({ sheet: tab.name, reason: 'no styles judged PASS or FAIL yet' });
+      continue;
+    }
+    inspections.push(...read.inspections);
+    defects.push(...read.defects);
+    used.push(tab.name);
+  }
+  const accounted = new Set([...used, ...skipped.map((s) => s.sheet)]);
+  for (const name of wb.SheetNames) {
+    if (accounted.has(name) || isHelperSheet(name)) continue;
+    skipped.push({ sheet: name, reason: 'not the Summary sheet or a month tab' });
+  }
+
   if (!inspections.length) warnings.push('Every month in the Summary sheet is still empty.');
-  return finish('monthly_inspection', inspections, defects, [sheetName],
-    wb.SheetNames.filter((n) => n !== sheetName && !isHelperSheet(n))
-      .map((s) => ({ sheet: s, reason: 'not the Summary sheet' })),
-    warnings, fileName);
+  return finish('monthly_inspection', inspections, defects, used, skipped,
+    warnings, fileName, linesSeen);
 }
 
 // ---------------------------------------------------------------------------

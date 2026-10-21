@@ -97,6 +97,22 @@ function defectSlices(matrix: QualityMatrix) {
 }
 
 /**
+ * The final-inspection ring, made to add up to every defect it was given: the top
+ * five, and the rest as one slice — the same rule as the floor ring above, so its
+ * centre reads the same total as the "major defects" figure beside it.
+ */
+function finalDefectSlices(summary: QualityMatrix['finalInspection']) {
+  const slices = summary.topDefects.map((d, i) => ({
+    label: d.category, value: d.qty, color: seriesColor(i)
+  }));
+  const tail = summary.defectsCategorised - summary.topDefects.reduce((sum, d) => sum + d.qty, 0);
+  if (tail > 0) {
+    slices.push({ label: 'Other categories', value: tail, color: seriesColor(slices.length) });
+  }
+  return slices;
+}
+
+/**
  * An empty window is almost never an empty database, so the message says which of
  * the two it is and where the figures actually are. "No data" on a screen holding
  * a year of reports is the kind of message that gets a working import declared
@@ -116,7 +132,7 @@ function emptyBody(matrix: QualityMatrix, latest: string | null): string {
     + formatDate(latest) + ' — press Latest to jump to it, or step back with the arrows.';
 }
 
-const NO_RECORDS: QualityRecords = { inspections: [], defects: [], lines: [], finals: [] };
+const NO_RECORDS: QualityRecords = { inspections: [], defects: [], lines: [], finals: [], verdicts: [] };
 
 /**
  * Quality, line by line, over the window the client reads it in: today, the
@@ -345,7 +361,10 @@ export function QualityManagementPage() {
             added together; the AQL column is a sampled audit and is not part of that sum.{' '}
             {showRejection && 'Rejection is defects found for every hundred pieces checked. '}
             Final inspection is
-            the pass rate of the final gate on its own, so a line can clear every earlier stage
+            the pass rate of the final gate on its own
+            {matrix.finalInspection.basis === 'styles'
+              && ' — the share of styles that passed, from the final inspection report'}
+            , so a line can clear every earlier stage
             and still read below target here. A line reads “Not inspected” when the reports
             imported for this period record no final gate for it — the pre-shipment audit above
             is filed for the factory as a whole and is not attributed to a line.
@@ -377,9 +396,11 @@ function StageKpi({ stat, stage, icon, index }: {
       icon={icon}
       tone={passPct == null ? 'blue' : passPct >= EFFICIENCY_THRESHOLD ? 'green' : 'red'}
       value={pctText(passPct)}
-      sub={stat
-        ? `${formatNumber(stat.checked)} checked · ${formatNumber(stat.defects)} defects`
-        : 'not inspected in this period'}
+      sub={!stat
+        ? 'not inspected in this period'
+        : stat.unit === 'styles'
+          ? `${formatNumber(stat.checked - stat.defects)} of ${formatNumber(stat.checked)} styles passed`
+          : `${formatNumber(stat.checked)} checked · ${formatNumber(stat.defects)} defects`}
     />
   );
 }
@@ -415,17 +436,21 @@ const monthList = (months: string[]): string =>
  * other gate: over the selected day, week or month, line by line, with pass and
  * fail counted both ways and a total underneath.
  *
- * The per-line figures come from the FINAL block on the KPI and daily sheets, and
- * count pieces. The pre-shipment audit at the foot of the card comes from the
- * monthly inspection report and counts styles that cleared at the first attempt.
- * They are two different measurements of the same gate and are never added
- * together — which is why the audit sits in a block of its own, labelled, rather
- * than in the totals row.
+ * The per-line figures come from the final inspection report's month tabs where
+ * they cover the window, and count styles judged PASS or FAIL; otherwise from the
+ * FINAL block on the KPI and daily sheets, in pieces. Every label below says which,
+ * because "2,074 pass" and "27 pass" are different kinds of number. The
+ * pre-shipment audit at the foot of the card is the report's Summary, factory-wide
+ * and monthly, and is never added into the totals row.
  */
 function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspection'] }) {
   const span = summary.span;
   const inspected = summary.lines.filter((l) => l.inspections > 0);
   const failing = inspected.filter((l) => (l.passPct ?? 100) < EFFICIENCY_THRESHOLD).length;
+  const styles = summary.basis === 'styles';
+  const of = (rate: number | null) => (summary.inspections === 0
+    ? 'nothing inspected in this window'
+    : pctText(rate) + (styles ? ' of styles inspected' : ' of pieces inspected'));
 
   return (
     <Card title="Final inspection" style={{ marginTop: 16 }}
@@ -435,9 +460,9 @@ function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspect
       {!summary.hasData ? (
         <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.7 }}>
           No final inspection was recorded in {spanLabel(span)}. The figures come from the
-          FINAL block on the KPI and daily quality reports, and from the monthly inspection
-          report's Summary sheet — step back with the arrows, or press Latest, to reach a
-          period that carries them.
+          final inspection report — its month tabs and its Summary sheet — and from the
+          FINAL block on the KPI and daily quality reports. Step back with the arrows, or
+          press Latest, to reach a period that carries them.
         </p>
       ) : (
         <>
@@ -447,26 +472,28 @@ function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspect
               own, and a card inside a card reads as a nesting that means nothing. */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px 40px' }}>
             <Figure
-              label="Inspections"
+              label={styles ? 'Styles inspected' : 'Inspections'}
               value={formatNumber(summary.inspections)}
               sub={summary.lineWise
-                ? `${inspected.length} of ${summary.lines.length} lines · ${summary.grain === 'daily' ? 'day by day' : 'month by month'}`
+                ? `${inspected.length} of ${summary.lines.length} lines · ${styles ? 'one verdict per style' : summary.grain === 'daily' ? 'day by day' : 'month by month'}`
                 : 'factory-wide audit only'} />
             <Figure
-              label="Pieces inspected"
+              label={styles ? 'Pieces sampled' : 'Pieces inspected'}
               value={formatNumber(summary.checked)}
-              sub={summary.inspections > 0
-                ? Math.round(summary.checked / summary.inspections) + ' per inspection'
-                : 'nothing inspected in this window'} />
+              sub={summary.inspections === 0
+                ? 'nothing inspected in this window'
+                : styles
+                  ? formatNumber(summary.defects) + ' major defects found'
+                  : Math.round(summary.checked / summary.inspections) + ' per inspection'} />
             <Figure
-              label="Pass"
+              label={styles ? 'Passed' : 'Pass'}
               value={formatNumber(summary.pass)}
-              sub={pctText(summary.passPct) + ' of pieces inspected'}
+              sub={of(summary.passPct)}
               color="var(--green-500)" />
             <Figure
-              label="Fail"
+              label={styles ? 'Failed' : 'Fail'}
               value={formatNumber(summary.fail)}
-              sub={pctText(summary.failPct) + ' of pieces inspected'}
+              sub={of(summary.failPct)}
               color="var(--red-500)" />
           </div>
 
@@ -476,10 +503,10 @@ function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspect
                 <thead>
                   <tr>
                     <th>Line</th>
-                    <th className="num">Inspections</th>
-                    <th className="num">Checked</th>
-                    <th className="num">Pass</th>
-                    <th className="num">Fail</th>
+                    <th className="num">{styles ? 'Styles' : 'Inspections'}</th>
+                    <th className="num">{styles ? 'Sampled' : 'Checked'}</th>
+                    <th className="num">{styles ? 'Passed' : 'Pass'}</th>
+                    <th className="num">{styles ? 'Failed' : 'Fail'}</th>
                     <th className="num">Pass %</th>
                     <th className="num">Fail %</th>
                     <th>Result</th>
@@ -508,9 +535,11 @@ function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspect
                     </td>
                     <td className="num">{pctText(summary.failPct)}</td>
                     <td style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-faint)' }}>
-                      {failing === 0
-                        ? 'every line at or above target'
-                        : failing + (failing === 1 ? ' line' : ' lines') + ' below target'}
+                      {inspected.length === 0
+                        ? 'no line inspected'
+                        : failing === 0
+                          ? 'every line at or above target'
+                          : failing + (failing === 1 ? ' line' : ' lines') + ' below target'}
                     </td>
                   </tr>
                 </tfoot>
@@ -521,14 +550,29 @@ function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspect
               The reports covering {spanLabel(span)} record the final inspection for the factory
               as a whole rather than line by line, so there is nothing to attribute — the
               pre-shipment audit below is the whole of it. Per-line pass and fail counts come
-              from the FINAL block on the KPI reports.
+              from the month tabs of the final inspection report (Line # and Pass/Fail on each
+              style), or from the FINAL block on the KPI reports.
             </p>
           )}
 
           <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.6 }}>
-            Pass and fail count pieces at the final gate, over {spanLabel(span)}. Pass % and
-            Fail % are each line's own counts over its own pieces, so the pair reads to 100%
-            on every row. A line reads “Not inspected” when the reports imported for this
+            {styles ? (
+              <>
+                Read from the month tabs of the final inspection report, over {spanLabel(span)}:
+                each row there is one style, sampled and judged PASS or FAIL against AQL 2.5.
+                Passed and Failed count those styles, and Pass % is styles passed over styles
+                inspected — the way the report's own first-time pass rate counts them. A style
+                inspected for two lines together counts toward both lines, and once in the
+                total.{' '}
+              </>
+            ) : (
+              <>
+                Pass and fail count pieces at the final gate, over {spanLabel(span)}, from the
+                FINAL block on the KPI reports. Pass % and Fail % are each line's own counts
+                over its own pieces, so the pair reads to 100% on every row.{' '}
+              </>
+            )}
+            A line reads “Not inspected” when the reports imported for this
             period record no final gate for it — that is not a zero pass rate. These figures
             are deliberately absent from the pieces-checked and pass-rate tiles at the top of
             the page: final inspection judges goods already counted at In line, End line and
@@ -543,9 +587,7 @@ function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspect
               <Donut
                 size={158}
                 centerLabel="defects"
-                slices={summary.topDefects.map((d, i) => ({
-                  label: d.category, value: d.qty, color: seriesColor(i)
-                }))}
+                slices={finalDefectSlices(summary)}
                 empty={'No final inspection defects were recorded in ' + spanLabel(span) + '.'}
               />
               {summary.topDefects.length > 0 && (

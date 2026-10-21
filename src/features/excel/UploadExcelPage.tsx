@@ -400,7 +400,9 @@ export function UploadExcelPage() {
                       <td className="num">{r.checkedQty != null ? formatNumber(r.checkedQty) : '—'}</td>
                       <td className="num">{r.passQty != null ? formatNumber(r.passQty) : '—'}</td>
                       <td className="num">{r.defectQty != null ? formatNumber(r.defectQty) : '—'}</td>
-                      <td className="num">{r.passPct != null ? r.passPct + '%' : '—'}</td>
+                      <td className="num">
+                        {r.verdict ? r.verdict.toUpperCase() : r.passPct != null ? r.passPct + '%' : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -724,8 +726,13 @@ export function UploadExcelPage() {
         <Card>
           <h3 style={{ fontSize: 21, margin: '0 0 5px' }}>This report has been uploaded before</h3>
           <p style={{ margin: '0 0 16px', color: 'var(--text-muted)', fontSize: 13.5 }}>
-            The file hash matches an earlier upload. Importing it again would count every
-            inspection twice.
+            {/* The final inspection report is answered month by month by its newest
+                upload, so a second copy replaces the first rather than adding to it. */}
+            {state.quality?.kind === 'monthly_inspection'
+              ? 'The file hash matches an earlier upload. Importing it again is safe: each month '
+                + 'in it replaces the same month from the earlier upload rather than adding to it.'
+              : 'The file hash matches an earlier upload. Importing it again would count every '
+                + 'inspection twice.'}
           </p>
           <div style={{ background: 'var(--amber-50)', border: '1px solid var(--amber-200)', borderRadius: 10, padding: 14, display: 'flex', flexWrap: 'wrap', gap: 20 }}>
             <span><strong>File</strong><br />{state.qualityDuplicate.original_filename}</span>

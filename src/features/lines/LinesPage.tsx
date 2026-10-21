@@ -30,7 +30,7 @@ const BLANK: LineEdit = {
 };
 
 /** Steady identity while the records query is in flight, so the builder is stable. */
-const NO_QUALITY: QualityRecords = { inspections: [], defects: [], lines: [], finals: [] };
+const NO_QUALITY: QualityRecords = { inspections: [], defects: [], lines: [], finals: [], verdicts: [] };
 
 /** Written the way the client says it: "In line + End line + Appearance". */
 const floorNote = FLOOR_STAGES.map((s) => STAGE_LABEL[s]).join(' + ');

@@ -10,12 +10,19 @@ export type QualityStage =
 export type QualityReportKind =
   | 'line_kpi' | 'daily_quality' | 'monthly_quality' | 'monthly_inspection' | 'defect_summary';
 
+/** PASS or FAIL against AQL 2.5, as the final inspection report writes it per style. */
+export type FinalVerdict = 'pass' | 'fail';
+
 export interface InspectionRow {
   lineNo: number | null;
   lineLabel: string | null;
   isFactory: boolean;
   styleNumber: string | null;
-  /** Daily reports date a row; monthly reports set periodMonth instead. */
+  /**
+   * Daily reports date a row; monthly reports set periodMonth instead. A style off
+   * a month tab of the final inspection report sets both: the day it was inspected
+   * and the month whose tab it was filed on, which are not always the same month.
+   */
   inspectionDate: string | null;
   periodMonth: string | null;
   stage: QualityStage;
@@ -24,6 +31,10 @@ export interface InspectionRow {
   defectQty: number | null;
   passPct: number | null;
   defectPct: number | null;
+  /** Only the final inspection report's month tabs give one; every other row leaves it out. */
+  verdict?: FinalVerdict;
+  /** Further lines a style inspected for several lines together ("1 & 4") is credited to. */
+  sharedLines?: number[];
 }
 
 export interface DefectRow {

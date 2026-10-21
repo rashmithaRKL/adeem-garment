@@ -96,7 +96,9 @@ export function QualitySection() {
               value: s.passPct ?? 0,
               suffix: pctText(s.passPct),
               color: low(s.passPct) ? MARK_LOW : MARK,
-              hint: `${formatNumber(s.checked)} checked · ${formatNumber(s.defects)} defects`
+              hint: s.unit === 'styles'
+                ? `${formatNumber(s.checked - s.defects)} of ${formatNumber(s.checked)} styles passed`
+                : `${formatNumber(s.checked)} checked · ${formatNumber(s.defects)} defects`
             }))}
           />
           <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)' }}>

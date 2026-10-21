@@ -609,6 +609,8 @@ export interface Database {
           defect_qty: number | null;
           pass_pct: number | null;
           defect_pct: number | null;
+          verdict: string | null;
+          shared_lines: number[] | null;
           created_at: string;
         };
         Insert: {
@@ -626,6 +628,8 @@ export interface Database {
           defect_qty?: number | null;
           pass_pct?: number | null;
           defect_pct?: number | null;
+          verdict?: string | null;
+          shared_lines?: number[] | null;
           created_at?: string;
         };
         Update: {
@@ -643,6 +647,8 @@ export interface Database {
           defect_qty?: number | null;
           pass_pct?: number | null;
           defect_pct?: number | null;
+          verdict?: string | null;
+          shared_lines?: number[] | null;
           created_at?: string;
         };
         Relationships: [
