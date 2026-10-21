@@ -18,7 +18,7 @@ import { QualityPeriodPicker } from '@/features/quality/QualityPeriodPicker';
 import { STAGE_LABEL } from '@/features/quality/types';
 import { fetchNextStyles } from '@/features/loading/queries';
 import { useIsManager } from '@/features/auth/AuthProvider';
-import { EFFICIENCY_THRESHOLD } from '@/lib/env';
+import { QUALITY_TARGET } from '@/lib/env';
 import { useTilt } from '@/lib/motion';
 import {
   fetchAllLines, createLine, updateLine, deleteLine,
@@ -68,7 +68,7 @@ export function LinesPage() {
     range ?? (datasetGrain(records) === 'daily' ? 'day' : 'month'),
     anchor ?? openingDate(records) ?? today()
   );
-  const matrix = buildQualityMatrix(records, span, EFFICIENCY_THRESHOLD);
+  const matrix = buildQualityMatrix(records, span, QUALITY_TARGET);
   const hasQuality = records.inspections.length > 0 || records.defects.length > 0;
   const qualityByLine = new Map(
     matrix.lines.filter((l) => l.lineNo != null).map((l) => [l.lineNo!, l])
@@ -234,7 +234,7 @@ export function LinesPage() {
                   <div className="grid" style={{ gridTemplateColumns: 'repeat(3,1fr)', textAlign: 'center', gap: 10 }}>
                     <div>
                       <div style={{ font: '600 18px/1 var(--font-heading)',
-                        color: passOf(q) < EFFICIENCY_THRESHOLD ? 'var(--red-500)' : 'var(--blue-500)' }}>
+                        color: passOf(q) < QUALITY_TARGET ? 'var(--red-500)' : 'var(--blue-500)' }}>
                         {passOf(q).toFixed(1)}%
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>Pass rate</div>

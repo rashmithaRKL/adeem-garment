@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { Donut, LineChart, RankedBars, seriesColor } from '@/components/charts';
 import { formatNumber } from '@/lib/format';
-import { EFFICIENCY_THRESHOLD } from '@/lib/env';
+import { QUALITY_TARGET } from '@/lib/env';
 import { useTilt, useCountUp } from '@/lib/motion';
 import { fetchQualityOverview } from './queries';
 import { STAGE_LABEL } from './types';
@@ -71,7 +71,7 @@ export function QualitySection() {
     );
   }
 
-  const low = (n: number | null) => n != null && n < EFFICIENCY_THRESHOLD;
+  const low = (n: number | null) => n != null && n < QUALITY_TARGET;
 
   return (
     <>
@@ -102,7 +102,7 @@ export function QualitySection() {
             }))}
           />
           <p style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-faint)' }}>
-            Bars run 0–100%. Red marks a stage under the {EFFICIENCY_THRESHOLD}% threshold.
+            Bars run 0–100%. Red marks a stage under the {QUALITY_TARGET}% threshold.
           </p>
         </Card>
 
@@ -138,13 +138,13 @@ export function QualitySection() {
 
         <Card title="Pass rate over time"
           aside={<span style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-            dashed line = {EFFICIENCY_THRESHOLD}% threshold
+            dashed line = {QUALITY_TARGET}% threshold
           </span>}>
           <LineChart
             domain="percent"
             area
             height={200}
-            threshold={{ value: EFFICIENCY_THRESHOLD, label: EFFICIENCY_THRESHOLD + '%' }}
+            threshold={{ value: QUALITY_TARGET, label: QUALITY_TARGET + '%' }}
             format={(n) => n.toFixed(1) + '%'}
             points={d.trend.map((p) => ({ label: p.date.slice(5), values: { pass: p.passPct } }))}
             series={[{ key: 'pass', label: 'Pass rate', color: MARK }]}

@@ -5,7 +5,7 @@ import { Kpi } from '@/components/Kpi';
 import { QueryState } from '@/components/QueryState';
 import { Donut, BarChart, DefectMatrix, LineChart, seriesColor } from '@/components/charts';
 import { formatDate, formatNumber } from '@/lib/format';
-import { EFFICIENCY_THRESHOLD } from '@/lib/env';
+import { QUALITY_TARGET } from '@/lib/env';
 import { useAuth } from '@/features/auth/AuthProvider';
 import {
   fetchQualityRecords, buildQualityMatrix, buildTrend, datasetGrain, latestDate,
@@ -157,7 +157,7 @@ export function QualityManagementPage() {
     range ?? (datasetGrain(data) === 'daily' ? 'day' : 'month'),
     anchor ?? openingDate(data) ?? today()
   );
-  const matrix = buildQualityMatrix(data, span, EFFICIENCY_THRESHOLD);
+  const matrix = buildQualityMatrix(data, span, QUALITY_TARGET);
 
   /**
    * The manager's tile, and only the manager's. Rejection is the same figures as
@@ -186,7 +186,7 @@ export function QualityManagementPage() {
         onAnchor={setAnchor}
         note={<>
           Pass{showRejection && ', rejection'} and final inspection are judged against
-          the {EFFICIENCY_THRESHOLD}% threshold.
+          the {QUALITY_TARGET}% threshold.
         </>}
       />
 
@@ -220,9 +220,9 @@ export function QualityManagementPage() {
             value={formatNumber(matrix.checked)}
             sub={floorNote} />
           <Kpi index={1} label="Pass rate" icon="✅"
-            tone={(matrix.passPct ?? 0) >= EFFICIENCY_THRESHOLD ? 'green' : 'red'}
+            tone={(matrix.passPct ?? 0) >= QUALITY_TARGET ? 'green' : 'red'}
             value={pctText(matrix.passPct)}
-            sub={'target ' + EFFICIENCY_THRESHOLD + '% · ' + floorNote} />
+            sub={'target ' + QUALITY_TARGET + '% · ' + floorNote} />
           <Kpi index={2} label="Defects found" icon="🧷" tone="orange"
             value={formatNumber(matrix.defects)}
             sub={floorNote} />
@@ -394,7 +394,7 @@ function StageKpi({ stat, stage, icon, index }: {
       index={index}
       label={STAGE_LABEL[stage]}
       icon={icon}
-      tone={passPct == null ? 'blue' : passPct >= EFFICIENCY_THRESHOLD ? 'green' : 'red'}
+      tone={passPct == null ? 'blue' : passPct >= QUALITY_TARGET ? 'green' : 'red'}
       value={pctText(passPct)}
       sub={!stat
         ? 'not inspected in this period'
@@ -446,7 +446,7 @@ const monthList = (months: string[]): string =>
 function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspection'] }) {
   const span = summary.span;
   const inspected = summary.lines.filter((l) => l.inspections > 0);
-  const failing = inspected.filter((l) => (l.passPct ?? 100) < EFFICIENCY_THRESHOLD).length;
+  const failing = inspected.filter((l) => (l.passPct ?? 100) < QUALITY_TARGET).length;
   const styles = summary.basis === 'styles';
   const of = (rate: number | null) => (summary.inspections === 0
     ? 'nothing inspected in this window'
@@ -528,7 +528,7 @@ function FinalInspectionCard({ summary }: { summary: QualityMatrix['finalInspect
                     <td className="num">{formatNumber(summary.pass)}</td>
                     <td className="num">{formatNumber(summary.fail)}</td>
                     <td className="num" style={{
-                      color: (summary.passPct ?? 0) >= EFFICIENCY_THRESHOLD
+                      color: (summary.passPct ?? 0) >= QUALITY_TARGET
                         ? 'var(--text)' : 'var(--red-500)'
                     }}>
                       {pctText(summary.passPct)}
@@ -638,7 +638,7 @@ function FinalLineRow({ line }: { line: FinalLineStat }) {
     );
   }
 
-  const passing = (line.passPct ?? 0) >= EFFICIENCY_THRESHOLD;
+  const passing = (line.passPct ?? 0) >= QUALITY_TARGET;
   return (
     <tr>
       <td style={{ font: '600 13.5px var(--font-heading)', letterSpacing: '.06em' }}>{line.label}</td>
@@ -696,7 +696,7 @@ function FinalAuditCard({ audit, span }: {
               label="First-time pass rate"
               value={pctText(audit.latest?.passPct ?? null)}
               sub={audit.latest ? monthLabel(audit.latest.month) : 'no month with figures'}
-              color={audit.latest?.passPct != null && audit.latest.passPct < EFFICIENCY_THRESHOLD
+              color={audit.latest?.passPct != null && audit.latest.passPct < QUALITY_TARGET
                 ? 'var(--red-500)'
                 : 'var(--green-500)'} />
             <Figure
@@ -735,7 +735,7 @@ function FinalAuditCard({ audit, span }: {
                       fontWeight: 600,
                       color: m.passPct == null
                         ? 'var(--text-faint)'
-                        : m.passPct >= EFFICIENCY_THRESHOLD ? 'var(--text)' : 'var(--red-500)'
+                        : m.passPct >= QUALITY_TARGET ? 'var(--text)' : 'var(--red-500)'
                     }}>
                       {pctText(m.passPct)}
                     </td>
@@ -768,7 +768,7 @@ function LineRow({ line, showRejection }: { line: LineQualityRow; showRejection:
       <td key={stage} className="num" title={`${formatNumber(value.checked)} checked · ${formatNumber(value.defects)} defects`}
         style={{
           fontWeight: 600,
-          color: value.passPct >= EFFICIENCY_THRESHOLD ? 'var(--text)' : 'var(--red-500)'
+          color: value.passPct >= QUALITY_TARGET ? 'var(--text)' : 'var(--red-500)'
         }}>
         {pctText(value.passPct)}
       </td>
@@ -784,7 +784,7 @@ function LineRow({ line, showRejection }: { line: LineQualityRow; showRejection:
       {showRejection && (
         <td className="num" style={{
           fontWeight: 600,
-          color: (line.rejectionPct ?? 0) > 100 - EFFICIENCY_THRESHOLD ? 'var(--red-500)' : 'var(--text)'
+          color: (line.rejectionPct ?? 0) > 100 - QUALITY_TARGET ? 'var(--red-500)' : 'var(--text)'
         }}>
           {pctText(line.rejectionPct)}
         </td>
@@ -816,7 +816,7 @@ function TrendPanel({ grain, data }: {
       domain="percent"
       area
       height={220}
-      threshold={{ value: EFFICIENCY_THRESHOLD, label: EFFICIENCY_THRESHOLD + '% target' }}
+      threshold={{ value: QUALITY_TARGET, label: QUALITY_TARGET + '% target' }}
       format={(n) => n.toFixed(1) + '%'}
       points={points.map((p) => ({
         label: axisLabel(p.date, grain === 'daily' ? 'day' : 'month'),

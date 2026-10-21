@@ -33,3 +33,10 @@ export const isConfigured = (): boolean => MISSING_ENV.length === 0;
 export const STORAGE_BUCKET = 'garment-excel-files';
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const EFFICIENCY_THRESHOLD = 80;
+
+/**
+ * The pass-rate target every quality screen judges against: floor gates, final
+ * inspection, the pre-shipment audit and rejection. Kept apart from
+ * EFFICIENCY_THRESHOLD, which judges production output and stays at 80.
+ */
+export const QUALITY_TARGET = 90;
